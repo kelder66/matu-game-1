@@ -1,7 +1,6 @@
 import Fastify from 'fastify';
 import staticPlugin from '@fastify/static';
 import { WebSocketServer, WebSocket } from 'ws';
-import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -38,9 +37,9 @@ function broadcast(room: Room, message: object, excludeId?: string) {
   }
 }
 
-// --- HTTP + WebSocket server ---
+// --- Server setup ---
 
-const app = Fastify();
+const app = Fastify({ logger: true });
 
 app.register(staticPlugin, {
   root: join(__dirname, '..', 'public'),
@@ -49,8 +48,10 @@ app.register(staticPlugin, {
 
 app.get('/health', async () => ({ status: 'ok' }));
 
-const httpServer = createServer(app.server);
-const wss = new WebSocketServer({ server: httpServer });
+// Start server, then attach WebSocket to the underlying HTTP server
+await app.listen({ port, host: '0.0.0.0' });
+
+const wss = new WebSocketServer({ server: app.server });
 
 wss.on('connection', (ws) => {
   let currentRoom: Room | null = null;
@@ -62,7 +63,6 @@ wss.on('connection', (ws) => {
 
       switch (msg.type) {
         case 'create': {
-          // Create a new room and join as player 1
           let roomId = generateRoomId();
           while (rooms.has(roomId)) roomId = generateRoomId();
           playerId = 'p1';
@@ -74,7 +74,6 @@ wss.on('connection', (ws) => {
         }
 
         case 'join': {
-          // Join an existing room as player 2
           const room = rooms.get(msg.roomId);
           if (!room) {
             ws.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
@@ -93,7 +92,6 @@ wss.on('connection', (ws) => {
         }
 
         case 'state': {
-          // Relay player state to the other player
           if (currentRoom && playerId) {
             broadcast(currentRoom, { type: 'state', playerId, data: msg.data }, playerId);
           }
@@ -114,8 +112,4 @@ wss.on('connection', (ws) => {
       }
     }
   });
-});
-
-httpServer.listen(port, '0.0.0.0', () => {
-  console.log(`Server running on port ${port}`);
 });
