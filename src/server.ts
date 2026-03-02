@@ -97,6 +97,28 @@ wss.on('connection', (ws) => {
           }
           break;
         }
+
+        case 'ihit': {
+          // Player reports they were hit — relay to opponent as confirmation
+          if (currentRoom && playerId) {
+            broadcast(currentRoom, { type: 'hit', data: msg.data }, playerId);
+          }
+          break;
+        }
+
+        case 'gameover': {
+          if (currentRoom) {
+            broadcast(currentRoom, { type: 'gameover', data: msg.data });
+          }
+          break;
+        }
+
+        case 'rematch': {
+          if (currentRoom) {
+            broadcast(currentRoom, { type: 'rematch' });
+          }
+          break;
+        }
       }
     } catch (err) {
       console.error('Message error:', err);
