@@ -93,6 +93,25 @@
     #btn-up    { left: 3%; top: 10%; width: 18%; height: 35%; }
     #btn-down  { left: 3%; bottom: 10%; width: 18%; height: 35%; }
     #btn-shoot { right: 3%; top: 25%; width: 22%; height: 50%; font-size: 2.5rem; }
+
+    /* Restart button */
+    #btn-restart {
+      display: none;
+      position: absolute;
+      left: 50%; transform: translateX(-50%);
+      bottom: 18%;
+      background: #1a3a6a;
+      color: #fff;
+      border: 2px solid #7af;
+      padding: 0.8rem 2.5rem;
+      font-size: clamp(1rem, 4vw, 1.2rem);
+      font-family: monospace;
+      cursor: pointer;
+      border-radius: 6px;
+      pointer-events: all;
+      z-index: 10;
+    }
+    #btn-restart.active { display: block; }
   </style>
 </head>
 <body>
@@ -127,6 +146,7 @@
       <div class="touch-btn" id="btn-up">▲</div>
       <div class="touch-btn" id="btn-down">▼</div>
       <div class="touch-btn" id="btn-shoot">🚀</div>
+      <button id="btn-restart" onclick="requestRematch()">PLAY AGAIN</button>
     </div>
   </div>
 

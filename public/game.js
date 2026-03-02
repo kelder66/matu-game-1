@@ -132,6 +132,7 @@ ws.addEventListener('message', (event) => {
     case 'gameover':
       gameOver = true;
       winner = msg.data.winner;
+      document.getElementById('btn-restart').classList.add('active');
       break;
 
     case 'rematch':
@@ -155,9 +156,13 @@ function startGame() {
   const wrapper = document.getElementById('game-wrapper');
   wrapper.classList.add('active');
 
-  // Show touch controls on touch devices
-  if ('ontouchstart' in window) {
-    document.getElementById('touch-controls').classList.add('active');
+  // Always show touch controls overlay (contains restart button)
+  // Hide movement/shoot buttons on non-touch devices via CSS
+  document.getElementById('touch-controls').classList.add('active');
+  if (!('ontouchstart' in window)) {
+    document.getElementById('btn-up').style.display = 'none';
+    document.getElementById('btn-down').style.display = 'none';
+    document.getElementById('btn-shoot').style.display = 'none';
   }
 
   scaleCanvas();
@@ -181,6 +186,12 @@ function resetGame() {
   opp.y = H / 2; opp.lives = START_LIVES; opp.rockets = []; opp.flash = 0;
   gameOver = false;
   winner = null;
+  processedHits.clear();
+  document.getElementById('btn-restart').classList.remove('active');
+}
+
+function requestRematch() {
+  ws.send(JSON.stringify({ type: 'rematch' }));
 }
 
 function checkGameOver() {
@@ -189,11 +200,13 @@ function checkGameOver() {
     ws.send(JSON.stringify({ type: 'gameover', data: { winner: w } }));
     gameOver = true;
     winner = w;
+    document.getElementById('btn-restart').classList.add('active');
   }
 }
 
 // ─── Rocket ID counter ────────────────────────────────────────────────────────
 let rocketId = 0;
+const processedHits = new Set(); // rocket IDs that have already hit me
 
 // ─── Game loop ────────────────────────────────────────────────────────────────
 function gameLoop() {
@@ -223,16 +236,14 @@ function update() {
   me.rockets.forEach(r => r.x += ROCKET_SPEED * dir);
 
   // Check if opponent's rockets hit me
-  const oppDir = myId === 'p1' ? -1 : 1;
-  opp.rockets = opp.rockets.filter(r => {
-    if (hitsMe(r)) {
+  opp.rockets.forEach(r => {
+    if (!processedHits.has(r.id) && hitsMe(r)) {
+      processedHits.add(r.id);
       me.lives = Math.max(0, me.lives - 1);
       me.flash = FLASH_DURATION;
       ws.send(JSON.stringify({ type: 'ihit', data: { lives: me.lives } }));
       checkGameOver();
-      return false;
     }
-    return true;
   });
 
   // Tick flash
