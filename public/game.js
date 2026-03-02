@@ -45,8 +45,15 @@ const stars = Array.from({ length: 120 }, () => ({
 
 // ─── Input ────────────────────────────────────────────────────────────────────
 const keys = {};
-window.addEventListener('keydown', e => { keys[e.code] = true; e.preventDefault(); });
-window.addEventListener('keyup',   e => { keys[e.code] = false; });
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  keys[e.code] = true;
+  e.preventDefault();
+});
+window.addEventListener('keyup', e => {
+  if (e.target.tagName === 'INPUT') return;
+  keys[e.code] = false;
+});
 
 let touchUp = false, touchDown = false, touchShoot = false;
 
