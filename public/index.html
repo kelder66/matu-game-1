@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Matu Game 1</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a1a; color: #fff; font-family: monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+    canvas { border: 2px solid #333; display: none; }
+    #lobby { text-align: center; }
+    h1 { font-size: 2.5rem; margin-bottom: 2rem; color: #7af; }
+    button { background: #1a3a6a; color: #fff; border: 2px solid #7af; padding: 0.75rem 2rem; font-size: 1rem; font-family: monospace; cursor: pointer; margin: 0.5rem; border-radius: 4px; }
+    button:hover { background: #2a5a9a; }
+    input { background: #111; color: #fff; border: 2px solid #7af; padding: 0.75rem 1rem; font-size: 1.2rem; font-family: monospace; text-align: center; border-radius: 4px; width: 200px; text-transform: uppercase; }
+    #room-code { font-size: 2rem; color: #7af; letter-spacing: 0.2rem; margin: 1rem 0; }
+    #status { color: #aaa; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div id="lobby">
+    <h1>🚀 MATU GAME 1</h1>
+    <div id="screen-main">
+      <button onclick="createRoom()">CREATE GAME</button>
+      <br/>
+      <button onclick="showJoin()">JOIN GAME</button>
+    </div>
+    <div id="screen-join" style="display:none">
+      <input id="room-input" placeholder="ENTER CODE" maxlength="12" />
+      <br/><br/>
+      <button onclick="joinRoom()">JOIN</button>
+    </div>
+    <div id="screen-wait" style="display:none">
+      <p>Share this code with your friend:</p>
+      <div id="room-code"></div>
+      <p id="status">Waiting for player 2...</p>
+    </div>
+  </div>
+
+  <canvas id="canvas" width="800" height="600"></canvas>
+
+  <script src="game.js"></script>
+</body>
+</html>
