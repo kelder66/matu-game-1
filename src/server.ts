@@ -113,6 +113,13 @@ wss.on('connection', (ws) => {
           break;
         }
 
+        case 'heartCaught': {
+          if (currentRoom && playerId) {
+            broadcast(currentRoom, { type: 'heartGiven', data: msg.data }, playerId);
+          }
+          break;
+        }
+
         case 'rematch': {
           if (currentRoom) {
             broadcast(currentRoom, { type: 'rematch' });

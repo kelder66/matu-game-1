@@ -7,7 +7,9 @@ const ROCKET_SPEED = 18;       // 2x faster
 const MAX_ROCKETS = 3;
 const SHOOT_COOLDOWN = 1000;   // 1 rocket per second
 const START_LIVES = 3;
+const MAX_LIVES = 5;
 const HIT_PAUSE_MS = 2000;     // 2 second pause on hit
+const HEART_CHANCE = 0.1;      // 10% chance to fire a heart
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
 const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -123,7 +125,12 @@ ws.addEventListener('message', (event) => {
       break;
 
     case 'ihit':
-      // I was hit — server shouldn't send this, handled locally
+      // I was hit — handled locally
+      break;
+
+    case 'heartGiven':
+      // Opponent caught my heart — update their lives
+      opp.lives = msg.data.lives;
       break;
 
     case 'gameover':
@@ -202,6 +209,23 @@ let rocketId = 0;
 const processedHits = new Set();
 
 // ─── Explosion system ─────────────────────────────────────────────────────────
+function spawnHeartCatch(x, y) {
+  const particles = Array.from({ length: 16 }, () => {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = Math.random() * 3 + 1;
+    return {
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1.0,
+      decay: 0.02,
+      size: Math.random() * 3 + 2,
+      color: '#ff69b4',
+    };
+  });
+  explosions.push({ x, y, ring: 0, ringColor: '#ff69b4', particles });
+}
+
 function spawnExplosion(x, y) {
   const particles = Array.from({ length: 24 }, () => {
     const angle = Math.random() * Math.PI * 2;
@@ -238,16 +262,19 @@ function drawExplosions() {
   for (const e of explosions) {
     if (e.ring < 100) {
       const a = 1 - e.ring / 100;
+      const ringColor = e.ringColor || 'rgba(255,200,50,';
       ctx.beginPath();
       ctx.arc(e.x, e.y, e.ring, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,200,50,${a})`;
+      ctx.strokeStyle = e.ringColor ? `rgba(255,105,180,${a})` : `rgba(255,200,50,${a})`;
       ctx.lineWidth = 3;
       ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(e.x, e.y, e.ring * 0.5, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,100,0,${a * 0.7})`;
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      if (!e.ringColor) {
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.ring * 0.5, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255,100,0,${a * 0.7})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     }
     for (const p of e.particles) {
       ctx.beginPath();
@@ -281,7 +308,8 @@ function update() {
     // Shoot
     const now = Date.now();
     if (isShoot() && me.rockets.length < MAX_ROCKETS && now - me.lastShot > SHOOT_COOLDOWN) {
-      me.rockets.push({ id: rocketId++, x: SHIP_X[myId], y: me.y });
+      const type = Math.random() < HEART_CHANCE ? 'heart' : 'rocket';
+      me.rockets.push({ id: rocketId++, x: SHIP_X[myId], y: me.y, type });
       me.lastShot = now;
     }
 
@@ -290,16 +318,26 @@ function update() {
     me.rockets = me.rockets.filter(r => r.x > 0 && r.x < W);
     me.rockets.forEach(r => r.x += ROCKET_SPEED * dir);
 
-    // Check if opponent's rockets hit me
+    // Check if opponent's projectiles hit me
     opp.rockets.forEach(r => {
       if (!processedHits.has(r.id) && hitsMe(r)) {
         processedHits.add(r.id);
-        me.lives = Math.max(0, me.lives - 1);
-        me.flash = 30;
-        spawnExplosion(SHIP_X[myId], me.y);
-        pauseUntil = Date.now() + HIT_PAUSE_MS;
-        ws.send(JSON.stringify({ type: 'ihit', data: { lives: me.lives } }));
-        checkGameOver();
+        if (r.type === 'heart') {
+          // Catch a heart — gain a life (max 5)
+          if (me.lives < MAX_LIVES) {
+            me.lives = me.lives + 1;
+            spawnHeartCatch(SHIP_X[myId], me.y);
+          }
+          ws.send(JSON.stringify({ type: 'heartCaught', data: { rocketId: r.id, lives: me.lives } }));
+        } else {
+          // Hit by a rocket — lose a life
+          me.lives = Math.max(0, me.lives - 1);
+          me.flash = 30;
+          spawnExplosion(SHIP_X[myId], me.y);
+          pauseUntil = Date.now() + HIT_PAUSE_MS;
+          ws.send(JSON.stringify({ type: 'ihit', data: { lives: me.lives } }));
+          checkGameOver();
+        }
       }
     });
   }
@@ -357,11 +395,23 @@ function render() {
   drawShip(SHIP_X[myId],                      me.y,  myFacing,  me.flash  > 0 ? '#fff' : (myId === 'p1' ? '#4af' : '#f84'));
   drawShip(SHIP_X[myId === 'p1' ? 'p2':'p1'], opp.y, oppFacing, opp.flash > 0 ? '#fff' : (myId === 'p1' ? '#f84' : '#4af'));
 
-  // Rockets
-  ctx.fillStyle = myId === 'p1' ? '#4af' : '#f84';
-  for (const r of me.rockets) drawRocket(r.x, r.y, myFacing);
-  ctx.fillStyle = myId === 'p1' ? '#f84' : '#4af';
-  for (const r of opp.rockets) drawRocket(r.x, r.y, oppFacing);
+  // Rockets & hearts
+  for (const r of me.rockets) {
+    if (r.type === 'heart') {
+      drawHeartProjectile(r.x, r.y);
+    } else {
+      ctx.fillStyle = myId === 'p1' ? '#4af' : '#f84';
+      drawRocket(r.x, r.y, myFacing);
+    }
+  }
+  for (const r of opp.rockets) {
+    if (r.type === 'heart') {
+      drawHeartProjectile(r.x, r.y);
+    } else {
+      ctx.fillStyle = myId === 'p1' ? '#f84' : '#4af';
+      drawRocket(r.x, r.y, oppFacing);
+    }
+  }
 
   // Explosions
   drawExplosions();
@@ -417,11 +467,21 @@ function drawRocket(x, y, facing) {
   ctx.restore();
 }
 
+function drawHeartProjectile(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.font = 'bold 22px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('💗', 0, 0);
+  ctx.restore();
+}
+
 function drawLives(x, y, count, color, align) {
   ctx.font = 'bold 18px monospace';
   ctx.fillStyle = color;
   ctx.textAlign = align;
-  ctx.fillText('❤️'.repeat(count) + '🖤'.repeat(START_LIVES - count), x, y + 16);
+  ctx.fillText('❤️'.repeat(count) + '🖤'.repeat(Math.max(0, MAX_LIVES - count)), x, y + 16);
 }
 
 function renderGameOver() {
