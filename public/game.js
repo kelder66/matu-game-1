@@ -3,11 +3,11 @@ const W = 800, H = 600;
 const SHIP_X = { p1: 80, p2: 720 };
 const SHIP_HALF_H = 22;
 const SHIP_SPEED = 5;
-const ROCKET_SPEED = 9;
+const ROCKET_SPEED = 18;       // 2x faster
 const MAX_ROCKETS = 3;
-const SHOOT_COOLDOWN = 400;
+const SHOOT_COOLDOWN = 1000;   // 1 rocket per second
 const START_LIVES = 3;
-const FLASH_DURATION = 40; // frames
+const HIT_PAUSE_MS = 2000;     // 2 second pause on hit
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
 const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -16,9 +16,10 @@ const ws = new WebSocket(`${protocol}://${location.host}`);
 // ─── State ────────────────────────────────────────────────────────────────────
 let myId = null;
 let gameStarted = false;
+let pauseUntil = 0;
 
 const me = {
-  y: H / 2, vy: 0,
+  y: H / 2,
   lives: START_LIVES,
   rockets: [],
   lastShot: 0,
@@ -34,8 +35,9 @@ const opp = {
 
 let gameOver = false;
 let winner = null;
+let explosions = [];
 
-// ─── Stars (background) ───────────────────────────────────────────────────────
+// ─── Stars ────────────────────────────────────────────────────────────────────
 const stars = Array.from({ length: 120 }, () => ({
   x: Math.random() * W,
   y: Math.random() * H,
@@ -61,8 +63,8 @@ function setupTouchBtn(id, onDown, onUp) {
   const el = document.getElementById(id);
   el.addEventListener('touchstart', e => { e.preventDefault(); onDown(); }, { passive: false });
   el.addEventListener('touchend',   e => { e.preventDefault(); onUp();   }, { passive: false });
-  el.addEventListener('mousedown',  e => { onDown(); });
-  el.addEventListener('mouseup',    e => { onUp();   });
+  el.addEventListener('mousedown',  () => onDown());
+  el.addEventListener('mouseup',    () => onUp());
 }
 
 setupTouchBtn('btn-up',    () => touchUp = true,    () => touchUp = false);
@@ -78,11 +80,7 @@ function showJoin() {
   document.getElementById('screen-main').style.display = 'none';
   document.getElementById('screen-join').style.display = 'block';
 }
-
-function createRoom() {
-  ws.send(JSON.stringify({ type: 'create' }));
-}
-
+function createRoom() { ws.send(JSON.stringify({ type: 'create' })); }
 function joinRoom() {
   const code = document.getElementById('room-input').value.trim().toUpperCase();
   if (!code) return;
@@ -116,17 +114,16 @@ ws.addEventListener('message', (event) => {
       break;
 
     case 'hit':
-      // Opponent confirmed a hit on themselves
+      // Opponent was hit — update their lives, show explosion on their ship
       opp.lives = msg.data.lives;
-      opp.flash = FLASH_DURATION;
+      opp.flash = 30;
+      spawnExplosion(SHIP_X[myId === 'p1' ? 'p2' : 'p1'], opp.y);
+      pauseUntil = Date.now() + HIT_PAUSE_MS;
       checkGameOver();
       break;
 
     case 'ihit':
-      // Server tells me I was hit
-      me.lives = msg.data.lives;
-      me.flash = FLASH_DURATION;
-      checkGameOver();
+      // I was hit — server shouldn't send this, handled locally
       break;
 
     case 'gameover':
@@ -153,11 +150,8 @@ ws.addEventListener('message', (event) => {
 // ─── Game control ─────────────────────────────────────────────────────────────
 function startGame() {
   document.getElementById('lobby').style.display = 'none';
-  const wrapper = document.getElementById('game-wrapper');
-  wrapper.classList.add('active');
+  document.getElementById('game-wrapper').classList.add('active');
 
-  // Always show touch controls overlay (contains restart button)
-  // Hide movement/shoot buttons on non-touch devices via CSS
   document.getElementById('touch-controls').classList.add('active');
   if (!('ontouchstart' in window)) {
     document.getElementById('btn-up').style.display = 'none';
@@ -167,26 +161,24 @@ function startGame() {
 
   scaleCanvas();
   window.addEventListener('resize', scaleCanvas);
-
   gameStarted = true;
   requestAnimationFrame(gameLoop);
 }
 
 function scaleCanvas() {
   const canvas = document.getElementById('canvas');
-  const scaleX = window.innerWidth / W;
-  const scaleY = window.innerHeight / H;
-  const scale = Math.min(scaleX, scaleY);
+  const scale = Math.min(window.innerWidth / W, window.innerHeight / H);
   canvas.style.width  = (W * scale) + 'px';
   canvas.style.height = (H * scale) + 'px';
 }
 
 function resetGame() {
-  me.y = H / 2; me.vy = 0; me.lives = START_LIVES; me.rockets = []; me.flash = 0; me.lastShot = 0;
+  me.y = H / 2; me.lives = START_LIVES; me.rockets = []; me.flash = 0; me.lastShot = 0;
   opp.y = H / 2; opp.lives = START_LIVES; opp.rockets = []; opp.flash = 0;
-  gameOver = false;
-  winner = null;
+  gameOver = false; winner = null;
+  explosions = [];
   processedHits.clear();
+  pauseUntil = 0;
   document.getElementById('btn-restart').classList.remove('active');
 }
 
@@ -195,6 +187,7 @@ function requestRematch() {
 }
 
 function checkGameOver() {
+  if (gameOver) return;
   if (me.lives <= 0 || opp.lives <= 0) {
     const w = me.lives <= 0 ? (myId === 'p1' ? 'p2' : 'p1') : myId;
     ws.send(JSON.stringify({ type: 'gameover', data: { winner: w } }));
@@ -204,9 +197,66 @@ function checkGameOver() {
   }
 }
 
-// ─── Rocket ID counter ────────────────────────────────────────────────────────
+// ─── Rocket ID & hit tracking ─────────────────────────────────────────────────
 let rocketId = 0;
-const processedHits = new Set(); // rocket IDs that have already hit me
+const processedHits = new Set();
+
+// ─── Explosion system ─────────────────────────────────────────────────────────
+function spawnExplosion(x, y) {
+  const particles = Array.from({ length: 24 }, () => {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = Math.random() * 5 + 1;
+    return {
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1.0,
+      decay: Math.random() * 0.02 + 0.015,
+      size: Math.random() * 4 + 2,
+      color: Math.random() > 0.5 ? '#ff8800' : '#ffee00',
+    };
+  });
+  explosions.push({ x, y, ring: 0, particles });
+}
+
+function updateExplosions() {
+  for (const e of explosions) {
+    e.ring += 4;
+    for (const p of e.particles) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= p.decay;
+      p.vx *= 0.95;
+      p.vy *= 0.95;
+    }
+    e.particles = e.particles.filter(p => p.life > 0);
+  }
+  explosions = explosions.filter(e => e.ring < 100 || e.particles.length > 0);
+}
+
+function drawExplosions() {
+  for (const e of explosions) {
+    if (e.ring < 100) {
+      const a = 1 - e.ring / 100;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.ring, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,200,50,${a})`;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.ring * 0.5, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,100,0,${a * 0.7})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    for (const p of e.particles) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      ctx.fillStyle = p.color + Math.floor(p.life * 255).toString(16).padStart(2, '0');
+      ctx.fill();
+    }
+  }
+}
 
 // ─── Game loop ────────────────────────────────────────────────────────────────
 function gameLoop() {
@@ -217,49 +267,53 @@ function gameLoop() {
 }
 
 function update() {
-  if (gameOver) return;
+  if (gameOver) { updateExplosions(); return; }
 
-  // Movement
-  if (isUp())   me.y = Math.max(SHIP_HALF_H, me.y - SHIP_SPEED);
-  if (isDown()) me.y = Math.min(H - SHIP_HALF_H, me.y + SHIP_SPEED);
+  updateExplosions();
 
-  // Shoot
-  const now = Date.now();
-  if (isShoot() && me.rockets.length < MAX_ROCKETS && now - me.lastShot > SHOOT_COOLDOWN) {
-    me.rockets.push({ id: rocketId++, x: SHIP_X[myId], y: me.y });
-    me.lastShot = now;
-  }
+  const paused = Date.now() < pauseUntil;
 
-  // Move my rockets
-  const dir = myId === 'p1' ? 1 : -1;
-  me.rockets = me.rockets.filter(r => r.x > 0 && r.x < W);
-  me.rockets.forEach(r => r.x += ROCKET_SPEED * dir);
+  if (!paused) {
+    // Movement
+    if (isUp())   me.y = Math.max(SHIP_HALF_H, me.y - SHIP_SPEED);
+    if (isDown()) me.y = Math.min(H - SHIP_HALF_H, me.y + SHIP_SPEED);
 
-  // Check if opponent's rockets hit me
-  opp.rockets.forEach(r => {
-    if (!processedHits.has(r.id) && hitsMe(r)) {
-      processedHits.add(r.id);
-      me.lives = Math.max(0, me.lives - 1);
-      me.flash = FLASH_DURATION;
-      ws.send(JSON.stringify({ type: 'ihit', data: { lives: me.lives } }));
-      checkGameOver();
+    // Shoot
+    const now = Date.now();
+    if (isShoot() && me.rockets.length < MAX_ROCKETS && now - me.lastShot > SHOOT_COOLDOWN) {
+      me.rockets.push({ id: rocketId++, x: SHIP_X[myId], y: me.y });
+      me.lastShot = now;
     }
-  });
+
+    // Move my rockets
+    const dir = myId === 'p1' ? 1 : -1;
+    me.rockets = me.rockets.filter(r => r.x > 0 && r.x < W);
+    me.rockets.forEach(r => r.x += ROCKET_SPEED * dir);
+
+    // Check if opponent's rockets hit me
+    opp.rockets.forEach(r => {
+      if (!processedHits.has(r.id) && hitsMe(r)) {
+        processedHits.add(r.id);
+        me.lives = Math.max(0, me.lives - 1);
+        me.flash = 30;
+        spawnExplosion(SHIP_X[myId], me.y);
+        pauseUntil = Date.now() + HIT_PAUSE_MS;
+        ws.send(JSON.stringify({ type: 'ihit', data: { lives: me.lives } }));
+        checkGameOver();
+      }
+    });
+  }
 
   // Tick flash
   if (me.flash > 0)  me.flash--;
   if (opp.flash > 0) opp.flash--;
 
-  // Send state
-  ws.send(JSON.stringify({
-    type: 'state',
-    data: { y: me.y, rockets: me.rockets },
-  }));
+  // Always send state so opponent sees us
+  ws.send(JSON.stringify({ type: 'state', data: { y: me.y, rockets: me.rockets } }));
 }
 
 function hitsMe(rocket) {
-  const myX = SHIP_X[myId];
-  return Math.abs(rocket.x - myX) < 28 && Math.abs(rocket.y - me.y) < SHIP_HALF_H;
+  return Math.abs(rocket.x - SHIP_X[myId]) < 28 && Math.abs(rocket.y - me.y) < SHIP_HALF_H;
 }
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
@@ -283,45 +337,49 @@ function render() {
   ctx.setLineDash([10, 14]);
   ctx.strokeStyle = 'rgba(255,255,255,0.08)';
   ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(W / 2, 0);
-  ctx.lineTo(W / 2, H);
-  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.stroke();
   ctx.setLineDash([]);
 
   if (!gameStarted) return;
 
+  // Pause countdown
+  if (Date.now() < pauseUntil && !gameOver) {
+    const secs = Math.ceil((pauseUntil - Date.now()) / 1000);
+    ctx.font = 'bold 48px monospace';
+    ctx.fillStyle = 'rgba(255,255,100,0.8)';
+    ctx.textAlign = 'center';
+    ctx.fillText(`💥 ${secs}...`, W / 2, H / 2);
+  }
+
   // Ships
-  const p1Id = 'p1', p2Id = 'p2';
-  const myShipX  = SHIP_X[myId];
-  const oppShipX = myId === 'p1' ? SHIP_X.p2 : SHIP_X.p1;
   const myFacing  = myId === 'p1' ? 1 : -1;
   const oppFacing = -myFacing;
+  drawShip(SHIP_X[myId],                      me.y,  myFacing,  me.flash  > 0 ? '#fff' : (myId === 'p1' ? '#4af' : '#f84'));
+  drawShip(SHIP_X[myId === 'p1' ? 'p2':'p1'], opp.y, oppFacing, opp.flash > 0 ? '#fff' : (myId === 'p1' ? '#f84' : '#4af'));
 
-  drawShip(myShipX,  me.y,  myFacing,  me.flash  > 0 ? '#fff' : (myId  === 'p1' ? '#4af' : '#f84'));
-  drawShip(oppShipX, opp.y, oppFacing, opp.flash > 0 ? '#fff' : (myId === 'p1' ? '#f84' : '#4af'));
-
-  // Rockets — mine
+  // Rockets
   ctx.fillStyle = myId === 'p1' ? '#4af' : '#f84';
   for (const r of me.rockets) drawRocket(r.x, r.y, myFacing);
-
-  // Rockets — opponent's
   ctx.fillStyle = myId === 'p1' ? '#f84' : '#4af';
   for (const r of opp.rockets) drawRocket(r.x, r.y, oppFacing);
 
-  // HUD — lives
-  drawLives(20,  20, me.lives,  myId  === 'p1' ? '#4af' : '#f84', 'left');
-  drawLives(W - 20, 20, opp.lives, myId === 'p1' ? '#f84' : '#4af', 'right');
+  // Explosions
+  drawExplosions();
 
-  // Player labels
+  // HUD — lives always tied to ship side (P1=left, P2=right)
+  const p1Lives = myId === 'p1' ? me.lives : opp.lives;
+  const p2Lives = myId === 'p1' ? opp.lives : me.lives;
+  drawLives(20,     20, p1Lives, '#4af', 'left');
+  drawLives(W - 20, 20, p2Lives, '#f84', 'right');
+
+  // Labels always tied to ship side
   ctx.font = 'bold 13px monospace';
   ctx.fillStyle = 'rgba(255,255,255,0.4)';
   ctx.textAlign = 'left';
-  ctx.fillText('YOU', 20, H - 16);
+  ctx.fillText(myId === 'p1' ? 'YOU' : 'ENEMY', 20, H - 16);
   ctx.textAlign = 'right';
-  ctx.fillText('ENEMY', W - 20, H - 16);
+  ctx.fillText(myId === 'p1' ? 'ENEMY' : 'YOU', W - 20, H - 16);
 
-  // Game over overlay
   if (gameOver) renderGameOver();
 }
 
@@ -329,8 +387,6 @@ function drawShip(x, y, facing, color) {
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(facing, 1);
-
-  // Body
   ctx.beginPath();
   ctx.moveTo(28, 0);
   ctx.lineTo(-14, -SHIP_HALF_H + 4);
@@ -339,19 +395,14 @@ function drawShip(x, y, facing, color) {
   ctx.closePath();
   ctx.fillStyle = color;
   ctx.fill();
-
-  // Cockpit
   ctx.beginPath();
   ctx.ellipse(6, 0, 8, 5, 0, 0, Math.PI * 2);
   ctx.fillStyle = 'rgba(255,255,255,0.35)';
   ctx.fill();
-
-  // Engine glow
   ctx.beginPath();
   ctx.ellipse(-10, 0, 5, 3, 0, 0, Math.PI * 2);
   ctx.fillStyle = 'rgba(255,180,60,0.7)';
   ctx.fill();
-
   ctx.restore();
 }
 
@@ -361,11 +412,8 @@ function drawRocket(x, y, facing) {
   ctx.scale(facing, 1);
   ctx.fillRect(0, -3, 18, 6);
   ctx.beginPath();
-  ctx.moveTo(18, -3);
-  ctx.lineTo(26, 0);
-  ctx.lineTo(18, 3);
-  ctx.closePath();
-  ctx.fill();
+  ctx.moveTo(18, -3); ctx.lineTo(26, 0); ctx.lineTo(18, 3);
+  ctx.closePath(); ctx.fill();
   ctx.restore();
 }
 
@@ -373,35 +421,20 @@ function drawLives(x, y, count, color, align) {
   ctx.font = 'bold 18px monospace';
   ctx.fillStyle = color;
   ctx.textAlign = align;
-  const hearts = '❤️'.repeat(count) + '🖤'.repeat(START_LIVES - count);
-  ctx.fillText(hearts, x, y + 16);
+  ctx.fillText('❤️'.repeat(count) + '🖤'.repeat(START_LIVES - count), x, y + 16);
 }
 
 function renderGameOver() {
   ctx.fillStyle = 'rgba(0,0,0,0.65)';
   ctx.fillRect(0, 0, W, H);
-
-  const isWinner = winner === myId;
   ctx.textAlign = 'center';
-
+  const isWinner = winner === myId;
   ctx.font = 'bold 64px monospace';
   ctx.fillStyle = isWinner ? '#4f4' : '#f44';
   ctx.fillText(isWinner ? '🏆 YOU WIN!' : '💀 YOU LOSE', W / 2, H / 2 - 30);
-
-  ctx.font = '20px monospace';
-  ctx.fillStyle = '#aaa';
-  ctx.fillText('Tap or press Space to play again', W / 2, H / 2 + 30);
 }
 
-// Rematch trigger
+// Rematch
 window.addEventListener('keydown', e => {
-  if (e.code === 'Space' && gameOver) {
-    ws.send(JSON.stringify({ type: 'rematch' }));
-  }
-});
-canvas.addEventListener('click', () => {
-  if (gameOver) ws.send(JSON.stringify({ type: 'rematch' }));
-});
-canvas.addEventListener('touchend', () => {
-  if (gameOver) ws.send(JSON.stringify({ type: 'rematch' }));
+  if (e.code === 'Space' && gameOver) requestRematch();
 });
