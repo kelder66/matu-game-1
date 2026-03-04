@@ -48,6 +48,18 @@
     }
     #room-code { font-size: clamp(1.2rem, 6vw, 2rem); color: #7af; letter-spacing: 0.2rem; margin: 1rem 0; }
     #status { color: #aaa; margin-top: 1rem; }
+    #invite-wrap {
+      margin-top: 1.2rem;
+      background: #0d1a30;
+      border: 1px solid #2a4a7a;
+      border-radius: 6px;
+      padding: 0.7rem 1rem;
+      max-width: min(320px, 88vw);
+      margin-left: auto; margin-right: auto;
+    }
+    #invite-wrap p { font-size: 0.65rem; color: #7af; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.4rem; }
+    #invite-url { font-size: 0.68rem; color: #adf; word-break: break-all; display: block; margin-bottom: 0.5rem; }
+    .divider { margin: 1.5rem 0; border: none; border-top: 1px solid #1a2a4a; }
 
     /* Game wrapper */
     #game-wrapper {
@@ -121,6 +133,8 @@
     <h1>🚀 MATU GAME 1</h1>
 
     <div id="screen-main">
+      <button onclick="startSinglePlayer()">▶ SINGLE PLAYER</button>
+      <hr class="divider"/>
       <button onclick="createRoom()">CREATE GAME</button>
       <br/>
       <button onclick="showJoin()">JOIN GAME</button>
@@ -135,6 +149,11 @@
     <div id="screen-wait" style="display:none">
       <p>Share this code with your friend:</p>
       <div id="room-code"></div>
+      <div id="invite-wrap">
+        <p>Or send this invite link</p>
+        <span id="invite-url"></span>
+        <button onclick="copyInviteLink()">COPY LINK</button>
+      </div>
       <p id="status">Waiting for player 2...</p>
     </div>
   </div>

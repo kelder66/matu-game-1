@@ -3,13 +3,17 @@ const W = 800, H = 600;
 const SHIP_X = { p1: 80, p2: 720 };
 const SHIP_HALF_H = 22;
 const SHIP_SPEED = 5;
-const ROCKET_SPEED = 18;       // 2x faster
+const ROCKET_SPEED = 18;
 const MAX_ROCKETS = 3;
-const SHOOT_COOLDOWN = 1000;   // 1 rocket per second
+const SHOOT_COOLDOWN = 1000;
 const START_LIVES = 3;
 const MAX_LIVES = 5;
-const HIT_PAUSE_MS = 2000;     // 2 second pause on hit
-const HEART_CHANCE = 0.1;      // 10% chance to fire a heart
+const HIT_PAUSE_MS = 2000;
+const HEART_CHANCE = 0.1;
+
+// AI constants
+const AI_SPEED = 4;
+const AI_SHOOT_COOLDOWN = 1300;
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
 const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -19,6 +23,7 @@ const ws = new WebSocket(`${protocol}://${location.host}`);
 let myId = null;
 let gameStarted = false;
 let pauseUntil = 0;
+let singlePlayer = false;
 
 const me = {
   y: H / 2,
@@ -38,6 +43,11 @@ const opp = {
 let gameOver = false;
 let winner = null;
 let explosions = [];
+
+// AI state
+let aiTargetY = H / 2;
+let aiLastShot = 0;
+let aiRocketId = 0;
 
 // ─── Stars ────────────────────────────────────────────────────────────────────
 const stars = Array.from({ length: 120 }, () => ({
@@ -89,6 +99,22 @@ function joinRoom() {
   ws.send(JSON.stringify({ type: 'join', roomId: code }));
 }
 
+function startSinglePlayer() {
+  singlePlayer = true;
+  myId = 'p1';
+  startGame();
+}
+
+function copyInviteLink() {
+  const url = document.getElementById('invite-url').textContent;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.querySelector('#invite-wrap button');
+    const orig = btn.textContent;
+    btn.textContent = 'COPIED!';
+    setTimeout(() => btn.textContent = orig, 2000);
+  });
+}
+
 // ─── WebSocket messages ───────────────────────────────────────────────────────
 ws.addEventListener('message', (event) => {
   const msg = JSON.parse(event.data);
@@ -99,6 +125,8 @@ ws.addEventListener('message', (event) => {
       document.getElementById('screen-main').style.display = 'none';
       document.getElementById('screen-wait').style.display = 'block';
       document.getElementById('room-code').textContent = msg.roomId;
+      document.getElementById('invite-url').textContent =
+        `${location.origin}/?join=${msg.roomId}`;
       break;
 
     case 'joined':
@@ -116,7 +144,6 @@ ws.addEventListener('message', (event) => {
       break;
 
     case 'hit':
-      // Opponent was hit — update their lives, show explosion on their ship
       opp.lives = msg.data.lives;
       opp.flash = 30;
       spawnExplosion(SHIP_X[myId === 'p1' ? 'p2' : 'p1'], opp.y);
@@ -124,12 +151,7 @@ ws.addEventListener('message', (event) => {
       checkGameOver();
       break;
 
-    case 'ihit':
-      // I was hit — handled locally
-      break;
-
     case 'heartGiven':
-      // Opponent caught my heart — update their lives
       opp.lives = msg.data.lives;
       break;
 
@@ -186,18 +208,26 @@ function resetGame() {
   explosions = [];
   processedHits.clear();
   pauseUntil = 0;
+  aiTargetY = H / 2;
+  aiLastShot = 0;
   document.getElementById('btn-restart').classList.remove('active');
 }
 
 function requestRematch() {
-  ws.send(JSON.stringify({ type: 'rematch' }));
+  if (singlePlayer) {
+    resetGame();
+  } else {
+    ws.send(JSON.stringify({ type: 'rematch' }));
+  }
 }
 
 function checkGameOver() {
   if (gameOver) return;
   if (me.lives <= 0 || opp.lives <= 0) {
     const w = me.lives <= 0 ? (myId === 'p1' ? 'p2' : 'p1') : myId;
-    ws.send(JSON.stringify({ type: 'gameover', data: { winner: w } }));
+    if (!singlePlayer) {
+      ws.send(JSON.stringify({ type: 'gameover', data: { winner: w } }));
+    }
     gameOver = true;
     winner = w;
     document.getElementById('btn-restart').classList.add('active');
@@ -208,20 +238,57 @@ function checkGameOver() {
 let rocketId = 0;
 const processedHits = new Set();
 
+// ─── AI ───────────────────────────────────────────────────────────────────────
+function updateAI() {
+  // Smoothly track player Y with slight lag, adding a small random jitter
+  aiTargetY += (me.y - aiTargetY) * 0.07;
+  aiTargetY += (Math.random() - 0.5) * 10;
+  aiTargetY = Math.max(SHIP_HALF_H, Math.min(H - SHIP_HALF_H, aiTargetY));
+
+  if (opp.y < aiTargetY) opp.y = Math.min(H - SHIP_HALF_H, opp.y + AI_SPEED);
+  if (opp.y > aiTargetY) opp.y = Math.max(SHIP_HALF_H, opp.y - AI_SPEED);
+
+  // AI shoots left (p2 direction = -1)
+  const now = Date.now();
+  if (opp.rockets.length < MAX_ROCKETS && now - aiLastShot > AI_SHOOT_COOLDOWN) {
+    const type = Math.random() < HEART_CHANCE ? 'heart' : 'rocket';
+    opp.rockets.push({ id: 'ai' + aiRocketId++, x: SHIP_X['p2'], y: opp.y, type });
+    aiLastShot = now;
+  }
+
+  // Move AI rockets leftward and remove off-screen
+  opp.rockets.forEach(r => r.x -= ROCKET_SPEED);
+  opp.rockets = opp.rockets.filter(r => r.x > 0 && r.x < W);
+
+  // Check if my rockets hit the AI
+  me.rockets.forEach(r => {
+    if (!processedHits.has(r.id) && hitsAI(r)) {
+      processedHits.add(r.id);
+      if (r.type === 'heart') {
+        if (opp.lives < MAX_LIVES) opp.lives++;
+        spawnHeartCatch(SHIP_X['p2'], opp.y);
+      } else {
+        opp.lives = Math.max(0, opp.lives - 1);
+        opp.flash = 30;
+        spawnExplosion(SHIP_X['p2'], opp.y);
+        pauseUntil = Date.now() + HIT_PAUSE_MS;
+        checkGameOver();
+      }
+    }
+  });
+}
+
+function hitsAI(rocket) {
+  return Math.abs(rocket.x - SHIP_X['p2']) < 28 && Math.abs(rocket.y - opp.y) < SHIP_HALF_H;
+}
+
 // ─── Explosion system ─────────────────────────────────────────────────────────
 function spawnHeartCatch(x, y) {
   const particles = Array.from({ length: 16 }, () => {
     const angle = Math.random() * Math.PI * 2;
     const speed = Math.random() * 3 + 1;
-    return {
-      x, y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      life: 1.0,
-      decay: 0.02,
-      size: Math.random() * 3 + 2,
-      color: '#ff69b4',
-    };
+    return { x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+      life: 1.0, decay: 0.02, size: Math.random() * 3 + 2, color: '#ff69b4' };
   });
   explosions.push({ x, y, ring: 0, ringColor: '#ff69b4', particles });
 }
@@ -230,15 +297,9 @@ function spawnExplosion(x, y) {
   const particles = Array.from({ length: 24 }, () => {
     const angle = Math.random() * Math.PI * 2;
     const speed = Math.random() * 5 + 1;
-    return {
-      x, y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      life: 1.0,
-      decay: Math.random() * 0.02 + 0.015,
-      size: Math.random() * 4 + 2,
-      color: Math.random() > 0.5 ? '#ff8800' : '#ffee00',
-    };
+    return { x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+      life: 1.0, decay: Math.random() * 0.02 + 0.015, size: Math.random() * 4 + 2,
+      color: Math.random() > 0.5 ? '#ff8800' : '#ffee00' };
   });
   explosions.push({ x, y, ring: 0, particles });
 }
@@ -247,11 +308,9 @@ function updateExplosions() {
   for (const e of explosions) {
     e.ring += 4;
     for (const p of e.particles) {
-      p.x += p.vx;
-      p.y += p.vy;
+      p.x += p.vx; p.y += p.vy;
       p.life -= p.decay;
-      p.vx *= 0.95;
-      p.vy *= 0.95;
+      p.vx *= 0.95; p.vy *= 0.95;
     }
     e.particles = e.particles.filter(p => p.life > 0);
   }
@@ -262,7 +321,6 @@ function drawExplosions() {
   for (const e of explosions) {
     if (e.ring < 100) {
       const a = 1 - e.ring / 100;
-      const ringColor = e.ringColor || 'rgba(255,200,50,';
       ctx.beginPath();
       ctx.arc(e.x, e.y, e.ring, 0, Math.PI * 2);
       ctx.strokeStyle = e.ringColor ? `rgba(255,105,180,${a})` : `rgba(255,200,50,${a})`;
@@ -323,31 +381,31 @@ function update() {
       if (!processedHits.has(r.id) && hitsMe(r)) {
         processedHits.add(r.id);
         if (r.type === 'heart') {
-          // Catch a heart — gain a life (max 5)
           if (me.lives < MAX_LIVES) {
-            me.lives = me.lives + 1;
+            me.lives++;
             spawnHeartCatch(SHIP_X[myId], me.y);
           }
-          ws.send(JSON.stringify({ type: 'heartCaught', data: { rocketId: r.id, lives: me.lives } }));
+          if (!singlePlayer) ws.send(JSON.stringify({ type: 'heartCaught', data: { rocketId: r.id, lives: me.lives } }));
         } else {
-          // Hit by a rocket — lose a life
           me.lives = Math.max(0, me.lives - 1);
           me.flash = 30;
           spawnExplosion(SHIP_X[myId], me.y);
           pauseUntil = Date.now() + HIT_PAUSE_MS;
-          ws.send(JSON.stringify({ type: 'ihit', data: { lives: me.lives } }));
+          if (!singlePlayer) ws.send(JSON.stringify({ type: 'ihit', data: { lives: me.lives } }));
           checkGameOver();
         }
       }
     });
   }
 
-  // Tick flash
   if (me.flash > 0)  me.flash--;
   if (opp.flash > 0) opp.flash--;
 
-  // Always send state so opponent sees us
-  ws.send(JSON.stringify({ type: 'state', data: { y: me.y, rockets: me.rockets } }));
+  if (singlePlayer) {
+    updateAI();
+  } else {
+    ws.send(JSON.stringify({ type: 'state', data: { y: me.y, rockets: me.rockets } }));
+  }
 }
 
 function hitsMe(rocket) {
@@ -359,11 +417,9 @@ const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 
 function render() {
-  // Background
   ctx.fillStyle = '#080818';
   ctx.fillRect(0, 0, W, H);
 
-  // Stars
   for (const s of stars) {
     ctx.beginPath();
     ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
@@ -371,7 +427,6 @@ function render() {
     ctx.fill();
   }
 
-  // Centre divider
   ctx.setLineDash([10, 14]);
   ctx.strokeStyle = 'rgba(255,255,255,0.08)';
   ctx.lineWidth = 2;
@@ -380,7 +435,6 @@ function render() {
 
   if (!gameStarted) return;
 
-  // Pause countdown
   if (Date.now() < pauseUntil && !gameOver) {
     const secs = Math.ceil((pauseUntil - Date.now()) / 1000);
     ctx.font = 'bold 48px monospace';
@@ -389,46 +443,33 @@ function render() {
     ctx.fillText(`💥 ${secs}...`, W / 2, H / 2);
   }
 
-  // Ships
   const myFacing  = myId === 'p1' ? 1 : -1;
   const oppFacing = -myFacing;
   drawShip(SHIP_X[myId],                      me.y,  myFacing,  me.flash  > 0 ? '#fff' : (myId === 'p1' ? '#4af' : '#f84'));
   drawShip(SHIP_X[myId === 'p1' ? 'p2':'p1'], opp.y, oppFacing, opp.flash > 0 ? '#fff' : (myId === 'p1' ? '#f84' : '#4af'));
 
-  // Rockets & hearts
   for (const r of me.rockets) {
-    if (r.type === 'heart') {
-      drawHeartProjectile(r.x, r.y);
-    } else {
-      ctx.fillStyle = myId === 'p1' ? '#4af' : '#f84';
-      drawRocket(r.x, r.y, myFacing);
-    }
+    if (r.type === 'heart') drawHeartProjectile(r.x, r.y);
+    else { ctx.fillStyle = myId === 'p1' ? '#4af' : '#f84'; drawRocket(r.x, r.y, myFacing); }
   }
   for (const r of opp.rockets) {
-    if (r.type === 'heart') {
-      drawHeartProjectile(r.x, r.y);
-    } else {
-      ctx.fillStyle = myId === 'p1' ? '#f84' : '#4af';
-      drawRocket(r.x, r.y, oppFacing);
-    }
+    if (r.type === 'heart') drawHeartProjectile(r.x, r.y);
+    else { ctx.fillStyle = myId === 'p1' ? '#f84' : '#4af'; drawRocket(r.x, r.y, oppFacing); }
   }
 
-  // Explosions
   drawExplosions();
 
-  // HUD — lives always tied to ship side (P1=left, P2=right)
   const p1Lives = myId === 'p1' ? me.lives : opp.lives;
   const p2Lives = myId === 'p1' ? opp.lives : me.lives;
   drawLives(20,     20, p1Lives, '#4af', 'left');
   drawLives(W - 20, 20, p2Lives, '#f84', 'right');
 
-  // Labels always tied to ship side
   ctx.font = 'bold 13px monospace';
   ctx.fillStyle = 'rgba(255,255,255,0.4)';
   ctx.textAlign = 'left';
   ctx.fillText(myId === 'p1' ? 'YOU' : 'ENEMY', 20, H - 16);
   ctx.textAlign = 'right';
-  ctx.fillText(myId === 'p1' ? 'ENEMY' : 'YOU', W - 20, H - 16);
+  ctx.fillText(singlePlayer ? 'AI' : (myId === 'p1' ? 'ENEMY' : 'YOU'), W - 20, H - 16);
 
   if (gameOver) renderGameOver();
 }
@@ -494,7 +535,20 @@ function renderGameOver() {
   ctx.fillText(isWinner ? '🏆 YOU WIN!' : '💀 YOU LOSE', W / 2, H / 2 - 30);
 }
 
-// Rematch
+// ─── Invite link: auto-join if ?join=ROOM-CODE in URL ────────────────────────
+(function autoJoin() {
+  const code = new URLSearchParams(location.search).get('join');
+  if (!code) return;
+  const roomId = code.toUpperCase();
+  document.getElementById('screen-main').style.display = 'none';
+  document.getElementById('screen-join').style.display = 'block';
+  document.getElementById('room-input').value = roomId;
+  const doJoin = () => ws.send(JSON.stringify({ type: 'join', roomId }));
+  if (ws.readyState === WebSocket.OPEN) doJoin();
+  else ws.addEventListener('open', doJoin, { once: true });
+})();
+
+// ─── Keyboard shortcuts ───────────────────────────────────────────────────────
 window.addEventListener('keydown', e => {
   if (e.code === 'Space' && gameOver) requestRematch();
 });
