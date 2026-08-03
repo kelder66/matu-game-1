@@ -1,10 +1,13 @@
 import { PerspectiveCamera, Vector3 } from 'three';
-import { MAX_HITS, RAD2DEG } from '../shared/protocol';
+import { DIFFICULTY_LABEL, MAX_HITS, RAD2DEG, type Difficulty } from '../shared/protocol';
+import type { FlightState } from '../shared/flight';
+import { Minimap } from './minimap';
 import type { Remote } from './net';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
-const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
+// Defensive default: a missing colour used to throw here and blank the whole HUD.
+const hex = (c: number) => '#' + (c ?? 0xffffff).toString(16).padStart(6, '0');
 
 export class Hud {
   private pips = $('pips');
@@ -18,16 +21,29 @@ export class Hud {
   private arrowGlyph = $('arrowGlyph');
   private arrowDist = $('arrowDist');
   private hitFlash = $('hitFlash');
+  private diffBadge = $('diffBadge');
+  private minimap = new Minimap($<HTMLCanvasElement>('minimap'));
 
   private tags = new Map<string, HTMLElement>();
   private flashUntil = 0;
   private lockUntil = 0;
+  private diffFlashUntil = 0;
 
   constructor() {
     for (let i = 0; i < MAX_HITS; i++) {
       const el = document.createElement('div');
       el.className = 'pip';
       this.pips.appendChild(el);
+    }
+  }
+
+  setDifficulty(level: Difficulty, by: string | null) {
+    this.diffBadge.textContent = by
+      ? `${by} valis: ${DIFFICULTY_LABEL[level]}`
+      : `RASKUS: ${DIFFICULTY_LABEL[level]}`;
+    if (by) {
+      this.diffBadge.classList.add('changed');
+      this.diffFlashUntil = performance.now() + 1600;
     }
   }
 
@@ -54,7 +70,16 @@ export class Hud {
     this.crosshair.classList.add('locked');
   }
 
-  setRoster(rows: { name: string; color: number; hits: number; alive: boolean; me: boolean }[]) {
+  setRoster(
+    rows: {
+      name: string;
+      color: number;
+      hits: number;
+      alive: boolean;
+      me: boolean;
+      bot: boolean;
+    }[],
+  ) {
     this.roster.replaceChildren();
     for (const r of rows) {
       const row = document.createElement('div');
@@ -65,7 +90,7 @@ export class Hud {
       hp.textContent = r.alive ? `${MAX_HITS - r.hits}/${MAX_HITS}` : '💥';
 
       const name = document.createElement('span');
-      name.textContent = r.me ? `${r.name} (sina)` : r.name;
+      name.textContent = r.me ? `${r.name} (sina)` : r.bot ? `🤖 ${r.name}` : r.name;
 
       const sw = document.createElement('span');
       sw.className = 'swatch';
@@ -89,7 +114,12 @@ export class Hud {
    * Nametags and the off-screen direction arrow. Without the arrow a kid spends the
    * whole session alone over Estonia.
    */
-  update(camera: PerspectiveCamera, myPos: Vector3, remotes: Map<string, Remote>) {
+  update(
+    camera: PerspectiveCamera,
+    myPos: Vector3,
+    state: FlightState,
+    remotes: Map<string, Remote>,
+  ) {
     const now = performance.now();
     if (this.flashUntil && now > this.flashUntil) {
       this.flashUntil = 0;
@@ -99,6 +129,12 @@ export class Hud {
       this.lockUntil = 0;
       this.crosshair.classList.remove('locked');
     }
+    if (this.diffFlashUntil && now > this.diffFlashUntil) {
+      this.diffFlashUntil = 0;
+      this.diffBadge.classList.remove('changed');
+    }
+
+    this.minimap.draw(state, myPos, remotes);
 
     const w = window.innerWidth;
     const h = window.innerHeight;

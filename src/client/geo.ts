@@ -1,6 +1,6 @@
 import { Matrix4, Object3D, Quaternion, Vector3 } from 'three';
 import { WGS84_ELLIPSOID, OBJECT_FRAME, CAMERA_FRAME } from '3d-tiles-renderer';
-import type { FlightState } from './flight';
+import type { FlightState } from '../shared/flight';
 
 // World space is ECEF (Z-up), exactly what the ellipsoid math produces. The tiles
 // group is deliberately left at identity so no transform has to be undone.

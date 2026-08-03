@@ -1,7 +1,9 @@
 import { Quaternion, Vector3 } from 'three';
 import {
+  DEFAULT_DIFFICULTY,
   INTERP_DELAY_MS,
   type ClientMsg,
+  type Difficulty,
   type PlayerInfo,
   type ServerMsg,
   type SnapEntry,
@@ -30,6 +32,7 @@ export interface Remote {
 export interface NetHandlers {
   onWelcome(id: string, name: string, color: number, spawn: Spawn): void;
   onRoster(): void;
+  onDifficulty(level: Difficulty, by: string | null): void;
   onHit(targetId: string, shooterId: string, hits: number): void;
   onDeath(id: string, killerId: string): void;
   onRespawned(id: string, spawn: Spawn): void;
@@ -42,6 +45,7 @@ export class Net {
   myId = '';
   myName = '';
   myColor = 0xffffff;
+  difficulty: Difficulty = DEFAULT_DIFFICULTY;
   remotes = new Map<string, Remote>();
 
   private clockOffset: number | null = null;
@@ -85,11 +89,17 @@ export class Net {
         this.myId = msg.id;
         this.myName = msg.name;
         this.myColor = msg.color;
+        this.difficulty = msg.difficulty;
         for (const p of msg.players) this.addRemote(p);
         this.handlers.onWelcome(msg.id, msg.name, msg.color, msg.spawn);
+        this.handlers.onDifficulty(msg.difficulty, null);
         this.handlers.onRoster();
         break;
       }
+      case 'difficulty':
+        this.difficulty = msg.level;
+        this.handlers.onDifficulty(msg.level, msg.by);
+        break;
       case 'joined':
         this.addRemote(msg.player);
         this.handlers.onRoster();

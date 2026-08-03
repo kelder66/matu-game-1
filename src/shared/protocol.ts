@@ -6,10 +6,23 @@ export const MAX_HITS = 10;
 export const INTERP_DELAY_MS = 120;
 export const RESPAWN_DELAY_MS = 2000;
 
-/** Everyone spawns on a ring around here so players actually find each other. */
-export const WORLD_CENTER = { lat: 59.437, lon: 24.7536 }; // Tallinn Old Town, degrees
+/**
+ * Everyone spawns on a ring around here so players actually find each other.
+ *
+ * Helsinki, NOT Tallinn: Google's Photorealistic 3D Tiles only carry photogrammetry
+ * (buildings, trees) inside published coverage areas. Terrain is worldwide, but the
+ * only covered spots in Estonia are Parnu and Haapsalu -- Tallinn renders as flat
+ * imagery draped on a hill no matter what the renderer settings say.
+ * Coverage map: developers.google.com/maps/documentation/javascript/3d/coverage
+ *
+ * Moving the world elsewhere means revisiting NPC.GROUND_ALT below, which is a
+ * local terrain figure.
+ */
+export const WORLD_CENTER = { lat: 60.17, lon: 24.94 }; // Helsinki, degrees
 export const SPAWN_RING_M = 1500;
 export const SPAWN_ALT_M = 800;
+/** More than MAX_PLAYERS so humans and NPCs never share a spawn point. */
+export const SPAWN_RING_POINTS = 8;
 
 /** Player plane colours, one per slot. */
 export const COLORS = [0xff4444, 0x4488ff, 0xffcc33, 0x44dd66, 0xdd55dd];
@@ -47,6 +60,115 @@ export const COMBAT = {
   STATE_FRESH_MS: 1500,
 } as const;
 
+// --- NPCs -----------------------------------------------------------------
+
+export const NPC_COUNT = 2;
+
+/** Deliberately desaturated gunmetal: grey-vs-colour reads instantly in the sky. */
+export const BOT_COLORS = [0x9099a8, 0x5f6875];
+export const BOT_NAMES = ['Robot-1', 'Robot-2'];
+
+export const NPC = {
+  /**
+   * Metres above the ELLIPSOID that NPCs treat as the ground. The server has no
+   * terrain data, so this is a hand-set floor for the current WORLD_CENTER
+   * (Helsinki: geoid separation ~+19 m, tallest structure ~134 m). FLIGHT.MIN_AGL
+   * stacks on top, so NPCs bottom out around 240 m. Moving the world means
+   * revisiting this number.
+   */
+  GROUND_ALT: 120,
+  /** Soft band: outside it the AI biases its pitch back toward the middle. */
+  MIN_ALT: 350,
+  MAX_ALT: 3000,
+  /**
+   * Half-angle of the firing cone. Deliberately much wider than a player's tube:
+   * the AI steers with bang-bang controls at 20 Hz, so its nose oscillates and a
+   * 5 deg cone measured out at a 2% duty cycle -- the bots looked busy and were
+   * completely harmless. Hit *probability* (per tier) is the real damage knob;
+   * this only decides when they bother pulling the trigger.
+   */
+  FIRE_CONE: 0.3, // rad, ~17 deg
+  /** Two bots closer than this nudge apart, so they don't fly as one plane. */
+  SEPARATION_M: 250,
+  /** Chase leash: beyond LEASH_M head home until back inside LEASH_HOME_M. */
+  LEASH_M: 12000,
+  LEASH_HOME_M: 8000,
+  RESPAWN_MS: 5000, // longer than a human's, so the kid gets a victory lap
+  /** Grace period after respawning during which bots hold fire. */
+  SPAWN_GRACE_MS: 2000,
+} as const;
+
+export type Difficulty = 'easy' | 'medium' | 'hard';
+export const DEFAULT_DIFFICULTY: Difficulty = 'easy';
+export const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard'];
+
+/**
+ * NPC skill. Read fresh every tick, and no bot state is derived from it, so a
+ * mid-game change applies instantly with nothing to migrate -- do not cache this
+ * into a tuning object.
+ *
+ * A player at 130 m/s in a full 60 deg bank turns in 989 m, and out-ranges every
+ * tier (COMBAT.RANGE is 1500 m), so running away always works.
+ *
+ * MEASURED against a scripted target flying a lazy 2 km circle at 130 m/s
+ * (test/npc.mjs drives this): easy never killed it in 120 s, medium ~16 s,
+ * hard ~13 s. Re-measure after touching any of these numbers -- the paper
+ * arithmetic was off by an order of magnitude because a bang-bang controller
+ * only holds a firing solution a few percent of the time.
+ */
+export const DIFFICULTY = {
+  easy: {
+    turnFactor: 0.7, // x FLIGHT.MAX_BANK -> 42 deg -> 1363 m turn radius
+    aimError: 0.2, // rad (11 deg) -- the nose wanders well off target
+    fireIntervalMs: 600,
+    hitChance: 0.45,
+    range: 1000,
+    decisionMs: 900, // also the reaction delay: it chases a stale bearing between decisions
+    leadSeconds: 0, // pure pursuit: always ends up behind you, easy to shake
+    maxSpeed: 165, // well under the player's 220, so you can always run away
+    cruise: 130,
+    turnSpeed: 110, // slows in hard turns -- radius is v^2/(g tan bank)
+    evadeAt: 4,
+    evadeMs: 3500,
+  },
+  medium: {
+    turnFactor: 0.85, // 51 deg -> 906 m
+    aimError: 0.09,
+    fireIntervalMs: 320,
+    hitChance: 0.6,
+    range: 1100,
+    decisionMs: 550,
+    leadSeconds: 0.8,
+    maxSpeed: 180,
+    cruise: 145,
+    turnSpeed: 105,
+    evadeAt: 6,
+    evadeMs: 2500,
+  },
+  hard: {
+    turnFactor: 1.0, // 60 deg -> 528 m, out-turns the player 2:1
+    aimError: 0.025,
+    fireIntervalMs: 190,
+    hitChance: 0.8,
+    range: 1200,
+    decisionMs: 300,
+    leadSeconds: 1.2,
+    maxSpeed: 210,
+    cruise: 165,
+    turnSpeed: 95,
+    evadeAt: 8,
+    evadeMs: 1500,
+  },
+} as const;
+
+export type Tuning = (typeof DIFFICULTY)[Difficulty];
+
+export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
+  easy: 'KERGE',
+  medium: 'KESKMINE',
+  hard: 'RASKE',
+};
+
 // --- Plane state on the wire (angles in radians, alt/spd in metres) ---
 
 export interface WireState {
@@ -70,6 +192,8 @@ export interface PlayerInfo {
   color: number;
   hits: number;
   alive: boolean;
+  /** True for server-controlled NPCs. Only affects how the client draws them. */
+  bot: boolean;
 }
 
 export interface Spawn {
@@ -85,7 +209,8 @@ export type ClientMsg =
   | { t: 'join'; name: string }
   | ({ t: 'state' } & WireState)
   | { t: 'hit'; targetId: string }
-  | { t: 'respawn' };
+  | { t: 'respawn' }
+  | { t: 'difficulty'; level: Difficulty };
 
 // --- Server -> client ---
 
@@ -97,7 +222,9 @@ export type ServerMsg =
       color: number;
       players: PlayerInfo[];
       spawn: Spawn;
+      difficulty: Difficulty;
     }
+  | { t: 'difficulty'; level: Difficulty; by: string }
   | { t: 'joined'; player: PlayerInfo }
   | { t: 'left'; id: string }
   | { t: 'snapshot'; ts: number; players: SnapEntry[] }

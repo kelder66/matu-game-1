@@ -1,9 +1,16 @@
 import { Group, Quaternion, Vector3 } from 'three';
-import { COMBAT, TICK_MS, type Spawn } from '../shared/protocol';
-import { createFlightState, integrate, type FlightState } from './flight';
+import {
+  COMBAT,
+  DEFAULT_DIFFICULTY,
+  DIFFICULTIES,
+  TICK_MS,
+  type Difficulty,
+  type Spawn,
+} from '../shared/protocol';
+import { createFlightState, integrate, type FlightState } from '../shared/flight';
 import { applyPose } from './geo';
 import { Hud } from './hud';
-import { initInput, input } from './input';
+import { initInput, input, onPress } from './input';
 import { Explosions, Tracers, findTarget, muzzlePoint } from './combat';
 import { Net, type Remote } from './net';
 import { buildPlane } from './plane';
@@ -34,6 +41,9 @@ let fireCooldown = 0;
 let stateAccum = 0;
 let lastTime = 0;
 
+/** What this browser wants; the server holds the value everyone actually plays with. */
+let wantDifficulty: Difficulty = DEFAULT_DIFFICULTY;
+
 // --- Bootstrap ---
 
 async function main() {
@@ -55,6 +65,32 @@ async function main() {
   const nameInput = $<HTMLInputElement>('name');
   nameInput.value = localStorage.getItem('pilotName') || '';
   nameInput.focus();
+
+  const stored = localStorage.getItem('difficulty') as Difficulty | null;
+  if (stored && DIFFICULTIES.includes(stored)) wantDifficulty = stored;
+  const diffPick = $('diffPick');
+  const paintPicker = () => {
+    for (const b of diffPick.querySelectorAll('button')) {
+      b.classList.toggle('on', b.dataset.level === wantDifficulty);
+    }
+  };
+  diffPick.addEventListener('click', (e) => {
+    const level = (e.target as HTMLElement).dataset.level as Difficulty | undefined;
+    if (!level) return;
+    wantDifficulty = level;
+    localStorage.setItem('difficulty', level);
+    paintPicker();
+  });
+  paintPicker();
+
+  // F cycles difficulty mid-flight, so a stuck kid gets relief without a reload.
+  onPress('KeyF', () => {
+    if (!net) return;
+    const next = DIFFICULTIES[(DIFFICULTIES.indexOf(net.difficulty) + 1) % DIFFICULTIES.length];
+    wantDifficulty = next;
+    localStorage.setItem('difficulty', next);
+    net.send({ t: 'difficulty', level: next });
+  });
 
   $('fly').addEventListener('click', () => startGame(nameInput.value));
   nameInput.addEventListener('keydown', (e) => {
@@ -84,6 +120,13 @@ function startGame(rawName: string) {
       requestAnimationFrame(frame);
     },
     onRoster: refreshRoster,
+    onDifficulty: (level, by) => {
+      hud.setDifficulty(level, by);
+      // Only speak up if our pick differs, so joining doesn't spam a broadcast.
+      if (by === null && level !== wantDifficulty) {
+        net.send({ t: 'difficulty', level: wantDifficulty });
+      }
+    },
     onHit: (targetId, _shooterId, hits) => {
       if (targetId === net.myId) {
         myHits = hits;
@@ -150,6 +193,7 @@ function refreshRoster() {
       hits: myHits,
       alive,
       me: true,
+      bot: false,
     },
     ...[...net.remotes.values()].map((r) => ({
       name: r.info.name,
@@ -157,6 +201,7 @@ function refreshRoster() {
       hits: r.info.hits,
       alive: r.info.alive,
       me: false,
+      bot: r.info.bot,
     })),
   ];
   hud.setRoster(rows);
@@ -186,7 +231,7 @@ function frame(now: number) {
   // controls have zero latency regardless of ping.
   world.update(state, dt);
 
-  hud.update(world.camera, myPlane.position, net.remotes);
+  hud.update(world.camera, myPlane.position, state, net.remotes);
   hud.setReadout(state.speed, Math.max(0, state.alt - world.groundAlt));
   const attr = world.attributions();
   if (attr) hud.setAttribution(attr);

@@ -1,45 +1,90 @@
 import { WebSocket } from 'ws';
 import {
+  BOT_COLORS,
+  BOT_NAMES,
   COLORS,
   COMBAT,
+  DEFAULT_DIFFICULTY,
+  DIFFICULTY,
   MAX_HITS,
   MAX_PLAYERS,
+  NPC,
+  NPC_COUNT,
   RESPAWN_DELAY_MS,
   SPAWN_ALT_M,
   SPAWN_RING_M,
+  SPAWN_RING_POINTS,
   TICK_MS,
   WORLD_CENTER,
   DEG2RAD,
   type ClientMsg,
+  type Difficulty,
   type PlayerInfo,
   type ServerMsg,
   type Spawn,
+  type Tuning,
   type WireState,
 } from '../shared/protocol.js';
+import { createFlightState, integrate, type FlightState } from '../shared/flight.js';
+import {
+  aimAt,
+  applyLeash,
+  bearingTo,
+  canFire,
+  createBot,
+  decide,
+  groundRange,
+  patrolTarget,
+  stackOffset,
+  steer,
+  type Bot,
+  type BotTarget,
+} from './bots.js';
 
 const EARTH_R = 6378137;
 
-interface Player {
+/** Reused each bot tick -- the AI runs 40x/second and must not allocate. */
+const _aimState: WireState = { lat: 0, lon: 0, alt: 0, hdg: 0, pit: 0, rol: 0, spd: 0, fire: 0 };
+
+/** Anything that can be shot: humans and NPCs share the damage model. */
+interface Combatant {
   id: string;
   name: string;
-  slot: number;
-  ws: WebSocket;
   hits: number;
   alive: boolean;
   diedAt: number;
   state: WireState | null;
   stateAt: number;
+  bot: boolean;
+}
+
+interface Player extends Combatant {
+  bot: false;
+  slot: number;
+  ws: WebSocket;
   tokens: number;
   tokensAt: number;
   spawnCount: number;
   socketAlive: boolean;
+  diffAt: number;
+  /** Bots hold fire until this time, so a respawn isn't instantly punished. */
+  botSafeUntil: number;
+}
+
+/** An NPC. Kept OUT of `players` so the 5-human cap and every ws deref stay simple. */
+interface BotPlayer extends Combatant {
+  bot: true;
+  ai: Bot;
+  respawnAt: number;
+  leashed: boolean;
+  spawnCount: number;
 }
 
 /** Great-circle destination point, then the initial bearing back toward the centre. */
 function ringSpawn(index: number): Spawn {
   const lat1 = WORLD_CENTER.lat * DEG2RAD;
   const lon1 = WORLD_CENTER.lon * DEG2RAD;
-  const brg = (index * 2 * Math.PI) / MAX_PLAYERS;
+  const brg = (index * 2 * Math.PI) / SPAWN_RING_POINTS;
   const d = SPAWN_RING_M / EARTH_R;
 
   const lat = Math.asin(
@@ -103,9 +148,16 @@ function round(s: WireState) {
 
 export class World {
   private players = new Map<string, Player>();
+  private bots: BotPlayer[] = [];
   private timers: NodeJS.Timeout[] = [];
+  private difficulty: Difficulty = readDifficultyEnv();
+  /** Set while no humans are connected, so the first joiner finds bots on the ring. */
+  private botsParked = true;
 
   start() {
+    const count = readNpcCountEnv();
+    for (let i = 0; i < count; i++) this.bots.push(this.makeBot(i));
+
     this.timers.push(setInterval(() => this.tick(), TICK_MS));
     // Railway drops idle upgrades; without this we accumulate ghost planes.
     this.timers.push(setInterval(() => this.keepalive(), 30_000));
@@ -116,8 +168,20 @@ export class World {
     this.timers = [];
   }
 
-  private info(p: Player): PlayerInfo {
-    return { id: p.id, name: p.name, color: COLORS[p.slot], hits: p.hits, alive: p.alive };
+  private info(p: Combatant): PlayerInfo {
+    const color = p.bot
+      ? BOT_COLORS[(p as BotPlayer).ai.index % BOT_COLORS.length]
+      : COLORS[(p as Player).slot % COLORS.length];
+    return { id: p.id, name: p.name, color, hits: p.hits, alive: p.alive, bot: p.bot };
+  }
+
+  /** Humans and bots, for roster and hit lookups. */
+  private roster(): Combatant[] {
+    return [...this.players.values(), ...this.bots];
+  }
+
+  private find(id: string): Combatant | undefined {
+    return this.players.get(id) ?? this.bots.find((b) => b.id === id);
   }
 
   private send(ws: WebSocket, msg: ServerMsg) {
@@ -132,14 +196,17 @@ export class World {
   }
 
   private tick() {
+    const now = Date.now();
+    this.stepBots(now);
+
     const entries = [];
-    for (const p of this.players.values()) {
+    for (const p of this.roster()) {
       if (p.alive && p.state) entries.push({ id: p.id, ...round(p.state) });
     }
     if (entries.length === 0) return;
 
     // Serialise once, send to everyone including the sender so all clocks agree.
-    const data = JSON.stringify({ t: 'snapshot', ts: Date.now(), players: entries });
+    const data = JSON.stringify({ t: 'snapshot', ts: now, players: entries });
     for (const p of this.players.values()) {
       if (p.ws.readyState === WebSocket.OPEN) p.ws.send(data);
     }
@@ -190,6 +257,9 @@ export class World {
         case 'respawn':
           this.onRespawn(me);
           break;
+        case 'difficulty':
+          this.onDifficulty(me, msg.level);
+          break;
       }
     });
 
@@ -234,10 +304,20 @@ export class World {
       tokensAt: now,
       spawnCount: 0,
       socketAlive: true,
+      bot: false,
+      diffAt: 0,
+      botSafeUntil: now + NPC.SPAWN_GRACE_MS,
     };
     this.players.set(player.id, player);
 
-    const others = [...this.players.values()]
+    // Bots drift while nobody is watching; put them back on the ring for the first
+    // arrival so a kid never joins to an empty-looking sky.
+    if (this.botsParked) {
+      this.botsParked = false;
+      for (const b of this.bots) this.resetBot(b);
+    }
+
+    const others = this.roster()
       .filter((p) => p.id !== player.id)
       .map((p) => this.info(p));
 
@@ -245,19 +325,31 @@ export class World {
       t: 'welcome',
       id: player.id,
       name: player.name,
-      color: COLORS[slot],
+      color: COLORS[slot % COLORS.length],
       players: others,
       spawn: this.nextSpawn(player),
+      difficulty: this.difficulty,
     });
     this.broadcast({ t: 'joined', player: this.info(player) }, player.id);
     return player;
   }
 
   /** Rotate through ring points so repeated respawns don't stack in one spot. */
-  private nextSpawn(p: Player): Spawn {
-    const s = ringSpawn((p.slot + p.spawnCount) % MAX_PLAYERS);
+  private nextSpawn(p: { slot: number; spawnCount: number }): Spawn {
+    const s = ringSpawn((p.slot + p.spawnCount) % SPAWN_RING_POINTS);
     p.spawnCount++;
     return s;
+  }
+
+  private onDifficulty(p: Player, level: Difficulty) {
+    if (!(level in DIFFICULTY)) return;
+    if (level === this.difficulty) return; // don't broadcast a no-op
+    const now = Date.now();
+    if (now - p.diffAt < 500) return; // trivial anti-spam
+    p.diffAt = now;
+    this.difficulty = level;
+    // Nothing to migrate: stepBots reads DIFFICULTY[this.difficulty] fresh each tick.
+    this.broadcast({ t: 'difficulty', level, by: p.name });
   }
 
   private onState(p: Player, m: ClientMsg & { t: 'state' }) {
@@ -282,7 +374,7 @@ export class World {
    */
   private onHit(shooter: Player, targetId: string) {
     const now = Date.now();
-    const target = this.players.get(targetId);
+    const target = this.find(targetId);
 
     if (!shooter.alive || !shooter.state) return;
     if (!target || !target.alive || !target.state) return;
@@ -301,28 +393,209 @@ export class World {
 
     if (distance(shooter.state, target.state) > COMBAT.SERVER_RANGE) return;
 
+    this.applyHit(shooter.id, target, now);
+  }
+
+  /** The one place damage happens, for both the client-claim and NPC paths. */
+  private applyHit(shooterId: string, target: Combatant, now: number) {
     target.hits += 1;
-    this.broadcast({
-      t: 'hit',
-      targetId: target.id,
-      shooterId: shooter.id,
-      hits: target.hits,
-    });
+    this.broadcast({ t: 'hit', targetId: target.id, shooterId, hits: target.hits });
 
     if (target.hits >= MAX_HITS) {
       target.alive = false;
       target.diedAt = now;
-      this.broadcast({ t: 'death', id: target.id, killerId: shooter.id });
+      this.broadcast({ t: 'death', id: target.id, killerId: shooterId });
+      if (target.bot) (target as BotPlayer).respawnAt = now + NPC.RESPAWN_MS;
     }
   }
 
   private onRespawn(p: Player) {
     if (p.alive) return;
-    if (Date.now() - p.diedAt < RESPAWN_DELAY_MS) return;
+    const now = Date.now();
+    if (now - p.diedAt < RESPAWN_DELAY_MS) return;
     p.hits = 0;
     p.alive = true;
     p.state = null;
+    p.botSafeUntil = now + NPC.SPAWN_GRACE_MS;
     const s = this.nextSpawn(p);
     this.broadcast({ t: 'respawned', id: p.id, ...s });
   }
+
+  // --- NPCs ---------------------------------------------------------------
+
+  private makeBot(index: number): BotPlayer {
+    const bot: BotPlayer = {
+      id: `npc-${index}`,
+      name: BOT_NAMES[index % BOT_NAMES.length],
+      hits: 0,
+      alive: true,
+      diedAt: 0,
+      state: null,
+      stateAt: 0,
+      bot: true,
+      ai: createBot(index, createFlightState(0, 0, SPAWN_ALT_M, 0)),
+      respawnAt: 0,
+      leashed: false,
+      spawnCount: 0,
+    };
+    this.resetBot(bot);
+    return bot;
+  }
+
+  private resetBot(b: BotPlayer) {
+    // Bots take the ring points above MAX_PLAYERS, so they never collide with humans.
+    const s = ringSpawn((MAX_PLAYERS + b.ai.index + b.spawnCount) % SPAWN_RING_POINTS);
+    b.spawnCount++;
+    b.ai.fs = createFlightState(s.lat, s.lon, s.alt, s.hdg);
+    b.ai.targetId = '';
+    b.ai.decideAt = 0;
+    b.ai.evadeUntil = 0;
+    b.ai.firing = false;
+    b.leashed = false;
+    b.hits = 0;
+    b.alive = true;
+    b.state = writeState(b.ai.fs, false);
+    b.stateAt = Date.now();
+  }
+
+  private stepBots(now: number) {
+    if (this.bots.length === 0) return;
+
+    // Nobody watching: freeze completely. Zero CPU, and no drifting over the sea.
+    if (this.players.size === 0) {
+      this.botsParked = true;
+      return;
+    }
+
+    const d = DIFFICULTY[this.difficulty];
+    const dt = TICK_MS / 1000;
+
+    const candidates: BotTarget[] = [];
+    for (const p of this.players.values()) {
+      if (p.alive && p.state && now - p.stateAt < COMBAT.STATE_FRESH_MS) {
+        candidates.push({ id: p.id, state: p.state });
+      }
+    }
+
+    for (const b of this.bots) {
+      if (!b.alive) {
+        if (now >= b.respawnAt) {
+          this.resetBot(b);
+          const fs = b.ai.fs;
+          this.broadcast({
+            t: 'respawned',
+            id: b.id,
+            lat: fs.lat,
+            lon: fs.lon,
+            alt: fs.alt,
+            hdg: fs.heading,
+          });
+        }
+        continue;
+      }
+      this.stepBot(b, candidates, d, dt, now);
+    }
+  }
+
+  private stepBot(b: BotPlayer, candidates: BotTarget[], d: Tuning, dt: number, now: number) {
+    const ai = b.ai;
+    const sib = this.bots.find((o) => o !== b);
+
+    if (now >= ai.decideAt) {
+      ai.decideAt = now + d.decisionMs;
+      decide(ai, sib?.ai.targetId ?? '', candidates, d);
+    }
+
+    // Never hold a reference across ticks -- a disconnect would leave it dangling.
+    const target = ai.targetId ? this.players.get(ai.targetId) : undefined;
+    const targetState =
+      target && target.alive && target.state ? target.state : patrolTarget(ai.index, now);
+    const hunting = Boolean(target && target.alive && target.state);
+
+    // Wingman spacing first: bearingTo is scratch-free, so it can't clobber the aim.
+    if (sib && sib.alive) {
+      ai.sibRange = groundRange(ai.fs, sib.ai.fs);
+      ai.sibBearing = bearingTo(ai.fs, sib.ai.fs);
+    } else {
+      ai.sibRange = Infinity;
+    }
+
+    // Aim at a point offset above/below the target so the two bots stay on separate
+    // levels instead of converging into each other and jamming their own steering.
+    _aimState.lat = targetState.lat;
+    _aimState.lon = targetState.lon;
+    _aimState.alt = targetState.alt + (hunting ? stackOffset(ai.index) : 0);
+    _aimState.hdg = targetState.hdg;
+    _aimState.pit = targetState.pit;
+    _aimState.rol = targetState.rol;
+    _aimState.spd = targetState.spd;
+
+    const aim = aimAt(ai.fs, _aimState, hunting ? d.leadSeconds : 0);
+    b.leashed = applyLeash(ai, aim, b.leashed);
+
+    steer(ai, aim, d, now, hunting ? targetState.spd : 0);
+    integrate(ai.fs, ai.input, NPC.GROUND_ALT, dt);
+    if (ai.fs.speed > d.maxSpeed) ai.fs.speed = d.maxSpeed;
+
+    this.botFire(b, target, d, now, hunting && !b.leashed);
+
+    b.state = writeState(ai.fs, ai.firing);
+    b.stateAt = now;
+  }
+
+  private botFire(
+    b: BotPlayer,
+    target: Player | undefined,
+    d: Tuning,
+    now: number,
+    engaged: boolean,
+  ) {
+    const ai = b.ai;
+    ai.firing = false;
+    if (!engaged || now < ai.evadeUntil) return;
+    if (!target || !target.alive || !target.state) return;
+    if (now - target.stateAt > COMBAT.STATE_FRESH_MS) return;
+    if (now < target.botSafeUntil) return;
+
+    // No lead here: the round is hitscan, so aim at where the target actually is.
+    const aim = aimAt(ai.fs, target.state, 0);
+    if (!canFire(ai, aim, d)) return;
+
+    // Set `firing` whenever the target is in the sights, not only on trigger ticks.
+    // The client already draws tracers from this flag, so it becomes a free
+    // "break NOW" telegraph -- which is what keeps hard mode fair.
+    ai.firing = true;
+
+    if (now < ai.fireAt) return;
+    ai.fireAt = now + d.fireIntervalMs;
+    if (Math.random() > d.hitChance) return; // the miss IS the difficulty
+    this.applyHit(b.id, target, now);
+
+    if (b.hits >= d.evadeAt) ai.evadeUntil = now + d.evadeMs;
+  }
+}
+
+function writeState(fs: FlightState, firing: boolean): WireState {
+  return {
+    lat: fs.lat,
+    lon: fs.lon,
+    alt: fs.alt,
+    hdg: fs.heading,
+    pit: fs.pitch,
+    rol: fs.roll,
+    spd: fs.speed,
+    fire: firing ? 1 : 0,
+  };
+}
+
+function readNpcCountEnv(): number {
+  const raw = process.env.NPC_COUNT;
+  if (raw === undefined) return NPC_COUNT;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : NPC_COUNT;
+}
+
+function readDifficultyEnv(): Difficulty {
+  const raw = process.env.NPC_DIFFICULTY;
+  return raw && raw in DIFFICULTY ? (raw as Difficulty) : DEFAULT_DIFFICULTY;
 }

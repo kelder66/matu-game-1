@@ -1,7 +1,11 @@
 // Integration test for the server's authority rules. Start the server first, then:
 //   PORT=3100 npm start
 //   node test/netcode.mjs
-// It must be the only client connected -- it asserts on exact player counts.
+// It must be the only client connected AND the server must run with no NPCs --
+// it asserts on exact player counts:
+//   NPC_COUNT=0 PORT=3100 npm start
+// Keeping bots out of the players map is what makes the 5-human cap assertion
+// structurally correct rather than accidentally passing.
 import { WebSocket } from 'ws';
 
 const URL = process.env.TEST_WS || 'ws://localhost:3100/ws';
@@ -61,7 +65,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const a = new Client('Matu');
 const wa = await a.ready;
 check('welcome received', wa.t === 'welcome');
-check('spawn near Tallinn', Math.abs(wa.spawn.lat / D - 59.437) < 0.05, `lat=${(wa.spawn.lat / D).toFixed(3)}`);
+check('spawn near Helsinki', Math.abs(wa.spawn.lat / D - 60.17) < 0.05, `lat=${(wa.spawn.lat / D).toFixed(3)}`);
 check('spawn altitude 800', wa.spawn.alt === 800);
 
 const b = new Client('Kelder');
@@ -148,7 +152,7 @@ b.send({ t: 'respawn' });
 await sleep(200);
 const resp = b.of('respawned');
 check('respawn after cooldown works', resp.length === 1);
-if (resp.length) check('respawn resets to ring', Math.abs(resp[0].lat / D - 59.437) < 0.05);
+if (resp.length) check('respawn resets to ring', Math.abs(resp[0].lat / D - 60.17) < 0.05);
 await sleep(50);
 check('respawned player has full health', b.of('respawned').length === 1);
 

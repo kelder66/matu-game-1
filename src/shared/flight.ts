@@ -1,7 +1,32 @@
-import { FLIGHT } from '../shared/protocol';
-import type { Input } from './input';
+// Shared by the browser and the server (the NPCs fly with this exact model).
+// No three.js and no DOM in here -- this file compiles into the server bundle,
+// where `three` is only a devDependency and DOM types do not exist.
+import { FLIGHT } from './protocol.js';
 
 const EARTH_R = 6378137;
+
+/** What the flight model reads each step. Keyboard on the client, AI on the server. */
+export interface Input {
+  up: boolean;
+  down: boolean;
+  left: boolean;
+  right: boolean;
+  faster: boolean;
+  slower: boolean;
+  fire: boolean;
+}
+
+export function createInput(): Input {
+  return {
+    up: false,
+    down: false,
+    left: false,
+    right: false,
+    faster: false,
+    slower: false,
+    fire: false,
+  };
+}
 
 export interface FlightState {
   lat: number; // radians, geodetic

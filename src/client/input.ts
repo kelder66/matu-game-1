@@ -1,22 +1,8 @@
-export interface Input {
-  up: boolean;
-  down: boolean;
-  left: boolean;
-  right: boolean;
-  faster: boolean;
-  slower: boolean;
-  fire: boolean;
-}
+import { createInput, type Input } from '../shared/flight';
 
-export const input: Input = {
-  up: false,
-  down: false,
-  left: false,
-  right: false,
-  faster: false,
-  slower: false,
-  fire: false,
-};
+export type { Input };
+
+export const input: Input = createInput();
 
 const MAP: Record<string, keyof Input> = {
   ArrowUp: 'up',
@@ -34,10 +20,27 @@ const MAP: Record<string, keyof Input> = {
   Space: 'fire',
 };
 
+/** One-shot keys (fire once per press), for things that toggle rather than hold. */
+const presses = new Map<string, () => void>();
+
+export function onPress(code: string, fn: () => void) {
+  presses.set(code, fn);
+}
+
 function set(e: KeyboardEvent, value: boolean) {
   // Never swallow typing in the name field (this exact bug was fixed once already).
   const el = e.target as HTMLElement | null;
   if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
+
+  // One-shot handlers run before the held-key map, and ignore auto-repeat.
+  if (value && !e.repeat) {
+    const once = presses.get(e.code);
+    if (once) {
+      e.preventDefault();
+      once();
+      return;
+    }
+  }
 
   const action = MAP[e.code];
   if (!action) return;

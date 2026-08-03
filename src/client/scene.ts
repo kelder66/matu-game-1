@@ -26,7 +26,7 @@ import {
   TilesFadePlugin,
   GLTFExtensionsPlugin,
 } from '3d-tiles-renderer/plugins';
-import type { FlightState } from './flight';
+import type { FlightState } from '../shared/flight';
 import { cameraTransform, elevationAt, horizonDistance, surfaceNormal } from './geo';
 
 const EARTH_R = 6378137;
@@ -112,7 +112,7 @@ export function createWorld(canvas: HTMLCanvasElement, apiKey: string | null): W
         }
         // Ease toward the sample so a cliff edge doesn't make the floor stutter.
         world.groundAlt += (groundTarget - world.groundAlt) * (1 - Math.exp(-3 * dt));
-        // Stop streaming (and billing) while the tab is hidden.
+        // Stop streaming while the tab is hidden -- saves CPU, bandwidth and battery.
         if (!document.hidden) tiles.update();
       } else if (fallback) {
         fallback.update(state);
@@ -168,12 +168,20 @@ function createTiles(
   // NOTE: tiles.group is deliberately NOT rotated. World space stays ECEF so that
   // every getObjectFrame result drops straight in.
 
-  // Viewer apps use 6-16 here. We move at 130 m/s, so trade detail for keeping up
-  // (and for a much smaller Google bill).
-  tiles.errorTarget = 28;
-  tiles.lruCache.maxBytesSize = 400 * 1024 * 1024;
-  tiles.downloadQueue.maxJobs = 12;
-  tiles.parseQueue.maxJobs = 3;
+  // errorTarget is screen-space error in PIXELS: keep refining a tile until its
+  // geometric error projects to fewer than this many pixels. At 820 m and 65 deg FOV,
+  // 28 px accepts ~27 m of geometric error -- coarser than a whole building, which is
+  // why cities looked like a texture painted on a hill. 12 px accepts ~12 m, which is
+  // where roofs and towers actually appear, and still ~21 m at our 12 km ceiling.
+  //
+  // Google bills Photorealistic 3D Tiles per ROOT TILESET REQUEST -- one charge per
+  // ~3 h session, NOT per tile. Lowering this costs bandwidth and VRAM, not money.
+  tiles.errorTarget = 12; // raise to 16-20 if a weaker GPU struggles
+  tiles.downloadQueue.maxJobs = 18; // Google's guidance; library default is 25
+  tiles.parseQueue.maxJobs = 5; // library default -- DRACO decode is the bottleneck
+  // 400 MB is exactly the library default, so the old line here did nothing. A bigger
+  // cache is what stops the same street re-downloading every time we circle back.
+  tiles.lruCache.maxBytesSize = 800 * 1024 * 1024;
 
   tiles.setCamera(camera);
   tiles.setResolutionFromRenderer(camera, renderer);

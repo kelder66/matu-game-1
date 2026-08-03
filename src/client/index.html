@@ -14,8 +14,16 @@
     <div id="start" class="screen">
       <div class="panel">
         <h1>✈️ Matu lennumäng</h1>
-        <p class="sub">Lenda päris maailma kohal. Kuni 5 pilooti korraga.</p>
+        <p class="sub">
+          Lenda Helsingi kohal. Kuni 5 pilooti ja 2 robotlennukit, kes sind jahivad.
+        </p>
         <input id="name" type="text" maxlength="12" placeholder="Sinu nimi" autocomplete="off" />
+        <div class="segLabel">Robotite raskus</div>
+        <div id="diffPick" class="seg">
+          <button type="button" data-level="easy">KERGE</button>
+          <button type="button" data-level="medium">KESKMINE</button>
+          <button type="button" data-level="hard">RASKE</button>
+        </div>
         <button id="fly">LENDA</button>
         <p id="startError" class="error"></p>
         <div class="keys">
@@ -23,6 +31,7 @@
           <span><b>← →</b> kaldu ja pööra</span>
           <span><b>Shift / Ctrl</b> kiiremini / aeglasemalt</span>
           <span><b>Tühik</b> tulista</span>
+          <span><b>F</b> vaheta robotite raskust ka mängu ajal</span>
         </div>
       </div>
     </div>
@@ -39,6 +48,10 @@
       </div>
 
       <div id="roster"></div>
+      <div id="diffBadge"></div>
+
+      <!-- Display only: #hud sets pointer-events:none, so this never takes clicks. -->
+      <canvas id="minimap"></canvas>
 
       <div id="readout">
         <div><span id="speed">0</span> km/h</div>

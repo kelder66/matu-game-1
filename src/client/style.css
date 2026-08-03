@@ -249,10 +249,73 @@ button:active {
   text-overflow: ellipsis;
 }
 
-#offlineBadge {
+/* --- Difficulty segmented control (start screen) --- */
+
+.segLabel {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #8ba3ba;
+  margin-bottom: 6px;
+}
+
+.seg {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+/* The base `button` rule is full-width; these must not be. */
+.seg button {
+  width: auto;
+  padding: 10px 4px;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  background: #0b1725;
+  border: 1px solid #ffffff33;
+  color: #9fb6cc;
+}
+
+.seg button.on {
+  background: linear-gradient(180deg, #3f9bff, #2470d8);
+  border-color: transparent;
+  color: #fff;
+}
+
+/* --- Difficulty badge (in game) --- */
+
+#diffBadge {
+  position: absolute;
+  right: 20px;
+  top: 132px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: #9fb6cc;
+  text-align: right;
+  text-shadow: 0 1px 3px #000;
+  transition: color 0.3s;
+}
+
+#diffBadge.changed {
+  color: #ffcc44;
+}
+
+/* --- Minimap --- */
+
+#minimap {
   position: absolute;
   right: 20px;
   bottom: 20px;
+  border-radius: 50%;
+  /* Opaque enough to stay readable over bright satellite imagery. */
+  background: #0b1725d9;
+  border: 1px solid #ffffff33;
+}
+
+#offlineBadge {
+  position: absolute;
+  right: 20px;
+  bottom: 186px;
   font-size: 11px;
   letter-spacing: 1px;
   color: #ffcc66;

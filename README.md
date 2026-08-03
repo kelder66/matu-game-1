@@ -1,8 +1,15 @@
 # ✈️ Matu lennumäng
 
-Mitmikmängija 3D lennumäng brauseris. Lendad lennukiga päris maailma kohal (Google
-Photorealistic 3D Tiles), kuni **5 pilooti** korraga, sisselogimine ainult nimega.
-Kuulipildujaga tulistad teisi — **10 tabamust ja lennuk plahvatab**.
+Mitmikmängija 3D lennumäng brauseris. Lendad **Helsingi kohal** päris 3D-linnas
+(Google Photorealistic 3D Tiles), kuni **5 pilooti** korraga, sisselogimine ainult
+nimega. Lisaks jahib sind **2 robotlennukit**. Kuulipildujaga tulistad teisi —
+**10 tabamust ja lennuk plahvatab**.
+
+> **Miks Helsingi, mitte Tallinn?** Google'i fotorealistlikud 3D-plaadid katavad
+> reljeefi kogu maailmas, aga **hooneid ja puid ainult avaldatud aladel**. Eestis on
+> need ainult Pärnu ja Haapsalu kandis — Tallinn ja Tartu tulevad lameda satelliidipildina
+> reljeefi peal, ükskõik mida renderdajaga teha.
+> [Kattuvuse kaart](https://developers.google.com/maps/documentation/javascript/3d/coverage)
 
 Töötab desktop Chrome'is ja Safaris. Mobiiliversiooni ei ole.
 
@@ -14,15 +21,40 @@ Töötab desktop Chrome'is ja Safaris. Mobiiliversiooni ei ole.
 | ← → (või A D) | kaldu — lennuk pöörab kalde suunas |
 | Shift / Ctrl | kiiremini / aeglasemalt (250–790 km/h) |
 | Tühik | tulista |
+| F | vaheta robotite raskust (ka keset lendu) |
 
 Maapind ei tapa — kui lendad liiga madalale, lennuk lihtsalt ei lähe allapoole.
 Ainult kuulid tapavad.
+
+## Robotid
+
+Kaks halli robotlennukit jahivad mängijaid. Nad ei tulista teineteist ja neid saab
+alla lasta nagu iga teist lennukit (tulevad 5 s pärast tagasi).
+
+| Raskus | Mida see muudab |
+|---|---|
+| **KERGE** | Aeglane, kaldub laisalt, sihib 11° kõrvale, ei hoia ette. Testis ei suutnud 2 minutiga alla tulistada. |
+| **KESKMINE** | Aus võitlus — pöörab umbes sama järsult kui sina. Testis ~16 s surmani. |
+| **RASKE** | Pöörab sinust 2× järsemalt, sihib täpselt, tulistab 3× tihedamini. Testis ~13 s. |
+
+Kaks garanteeritud pääseteed, mille Matu ise avastab: robotid **ei lenda alla 240 m**
+ega **üle 3000 m**, ja nende max kiirus on alati väiksem kui sinu 220 m/s. Nad ka
+loobuvad, kui viid nad 12 km kaugusele keskusest.
+
+Raskust saab muuta **igaüks igal ajal** (avaekraanil või klahviga `F`) ja see kehtib
+kõigile korraga.
+
+## Minikaart
+
+Paremas alanurgas on nina-üles radar 4 km raadiusega. **Punane ring on relva ulatus**
+(1500 m) — selle sees saad tulistada. Ringike = inimene tema värvis, hall ruut =
+robot, ▲/▼ = kõrgemal/madalamal, servale surutud kolmnurk = kaugemal kui 4 km.
 
 ## Kuidas mängida
 
 1. Ava mängu URL (Railway aadress).
 2. Kirjuta nimi, vajuta **LENDA**.
-3. Kõik alustavad ringis Tallinna vanalinna kohal, et üksteist üles leida.
+3. Kõik alustavad ringis Helsingi kesklinna kohal, et üksteist üles leida.
    HUD-i kollane nool näitab lähima vastase suunda.
 4. Kui plahvatad, vajuta **LENDA UUESTI** — lehte ei pea uuesti laadima.
 
@@ -38,21 +70,24 @@ Vite proksib `/api` ja `/ws` serverile.
 
 **Ilma Google API võtmeta töötab mäng samuti** — siis on kaardi asemel lihtne
 roheline maakera koos ruudustikuga ja HUD-is on silt "OFFLINE KAART". Nii saab
-arendada ja testida ilma kvooti põletamata.
+arendada ja testida ilma internetita.
 
 ```bash
 npm run typecheck   # klient + jagatud kood
 npm run build       # vite build -> dist/public, tsc -> dist/server
 npm start           # käivitab dist/server/index.js
-npm test            # serveri reeglite test (server peab käima pordil 3100)
+npm test            # serveri reeglite test  -- NPC_COUNT=0 PORT=3100 npm start
+npm run test:npc    # robotite käitumise test -- PORT=3100 npm start
 ```
 
 Lisa `?debug` URL-i lõppu, et saada konsoolis `window.game` (stseen, olek, võrk).
 
 ## Google Maps API võti
 
-Photorealistic 3D Tiles on tasuline (~6 $ / 1000 lehe laadimist) ja vajab
-arveldusega Google Cloud kontot.
+Photorealistic 3D Tiles on tasuline (~6 $ / 1000 **root-päringut**, s.o umbes üks
+tasu ühe ~3 h mängusessiooni kohta — **mitte** iga tile'i eest) ja vajab arveldusega
+Google Cloud kontot. Seetõttu ei maksa kaardi detailsuse tõstmine (`errorTarget`
+failis `src/client/scene.ts`) mitte midagi — kulub ainult ribalaius ja mälu.
 
 1. [Cloud Console](https://console.cloud.google.com) → loo projekt → **lülita
    arveldus sisse**.
@@ -94,7 +129,9 @@ Kontrolli pärast deploy'd:
   ja kaamera asukoht tuleb `WGS84_ELLIPSOID.getObjectFrame(lat, lon, alt, hdg,
   pit, rol, ...)`-ist.
 - **Server** (`src/server`) — Fastify + `ws`. Üks globaalne maailm, ilma
-  toakoodideta.
+  toakoodideta. Robotid elavad samuti serveris (`src/server/bots.ts`) ja lendavad
+  **sama `integrate()`-iga** kui mängijad (`src/shared/flight.ts`), nii et nad ei saa
+  teha midagi, mida mängija ei saaks.
 - **Autoriteet on jagatud:** positsiooni omab klient (null latentsi juhtimisel),
   **tervist omab server** (tabamusi ei saa võltsida). Server valideerib iga
   tabamuse: mõlemad elus, olek värske, tulekiirus token bucket'iga piiratud,
