@@ -11,7 +11,8 @@ import {
 import { createFlightState, integrate, type FlightState } from '../shared/flight';
 import { applyPose } from './geo';
 import { Hud } from './hud';
-import { initInput, input, onPress } from './input';
+import { initInput, input, onPress, syncInput } from './input';
+import { initTouchControls, isTouchDevice, keepAwake } from './touch';
 import { Explosions, Tracers, findTarget, muzzlePoint } from './combat';
 import { Net, type Remote } from './net';
 import { buildPlane } from './plane';
@@ -61,6 +62,11 @@ async function main() {
   explosions = new Explosions(world.scene);
 
   initInput();
+  if (isTouchDevice()) {
+    initTouchControls();
+    keepAwake();
+    watchOrientation();
+  }
   window.addEventListener('resize', () => world.resize());
 
   const nameInput = $<HTMLInputElement>('name');
@@ -177,6 +183,15 @@ function startGame(rawName: string) {
   net.connect();
 }
 
+/** Portrait on a phone leaves no room for both the HUD and the thumbs. */
+function watchOrientation() {
+  const el = $('rotate');
+  const check = () => el.classList.toggle('needed', window.innerHeight > window.innerWidth);
+  check();
+  window.addEventListener('resize', check);
+  window.addEventListener('orientationchange', check);
+}
+
 function respawnSelf(spawn: Spawn) {
   state = createFlightState(spawn.lat, spawn.lon, spawn.alt, spawn.hdg);
   alive = true;
@@ -223,6 +238,8 @@ function frame(now: number) {
 
   const dt = Math.min((now - lastTime) / 1000, 0.1);
   lastTime = now;
+
+  syncInput(); // merge keyboard and touch before anything reads `input`
 
   if (alive) {
     integrate(state, input, world.groundAlt, dt);

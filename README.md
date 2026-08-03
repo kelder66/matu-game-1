@@ -11,7 +11,7 @@ nimega. Lisaks jahib sind **2 robotlennukit**. Kuulipildujaga tulistad teisi —
 > reljeefi peal, ükskõik mida renderdajaga teha.
 > [Kattuvuse kaart](https://developers.google.com/maps/documentation/javascript/3d/coverage)
 
-Töötab desktop Chrome'is ja Safaris. Mobiiliversiooni ei ole.
+Töötab arvutis (Chrome, Safari) ja **telefonis** (puutejuhtimine, landscape).
 
 ## Juhtimine
 
@@ -22,6 +22,22 @@ Töötab desktop Chrome'is ja Safaris. Mobiiliversiooni ei ole.
 | Shift / Ctrl | kiiremini / aeglasemalt (250–790 km/h) |
 | Tühik | tulista |
 | F | vaheta robotite raskust (ka keset lendu) |
+
+### Telefonis
+
+Keera telefon **külili** (portree-asendis palub mäng seda ise).
+
+| Juhtnupp | Tegevus |
+|---|---|
+| Vasak pöialnupp | lohista: üles/alla = nina, vasakule/paremale = kalle |
+| **TULI** (paremal all) | tulista |
+| **+ / −** | kiiremini / aeglasemalt |
+
+Pöialnupp on **analoog** — pool väljalööki annab poole kaldest, nii et saab teha ka
+loivi kurvi, mitte ainult järsku pööret. Mõlemat pöialt saab korraga kasutada
+(pöörad ja tulistad ühtaegu).
+
+Lisa URL-i lõppu `?touch`, et puutejuhtimist ka arvutis proovida.
 
 Maapind ei tapa — kui lendad liiga madalale, lennuk lihtsalt ei lähe allapoole.
 Ainult kuulid tapavad.
@@ -95,7 +111,12 @@ npm test            # serveri reeglite test  -- NPC_COUNT=0 PORT=3100 npm start
 npm run test:npc    # robotite käitumise test -- PORT=3100 npm start
 ```
 
-Lisa `?debug` URL-i lõppu, et saada konsoolis `window.game` (stseen, olek, võrk).
+Lisa `?debug` URL-i lõppu, et saada konsoolis `window.game` (stseen, olek, võrk),
+ja `?touch`, et sundida puutejuhtimine arvutis nähtavale.
+
+Telefonis on kaart meelega jämedam (`errorTarget` 22 vs 12), pikslitihedus piiratud
+1,5-ga, antialias väljas ja tile-cache 250 MB — muidu telefon ei jaksa ega jõua
+laadida.
 
 ## Google Maps API võti
 

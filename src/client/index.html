@@ -2,7 +2,12 @@
 <html lang="et">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Matu lennumäng</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✈️</text></svg>" />
     <link rel="stylesheet" href="./style.css" />
@@ -69,6 +74,24 @@
         <h1>💥 PLAHVATUS!</h1>
         <p id="killedBy" class="sub"></p>
         <button id="again">LENDA UUESTI</button>
+      </div>
+    </div>
+
+    <!-- Touch controls. Outside #hud, which is pointer-events:none. -->
+    <div id="touch" class="hidden">
+      <div id="stick"><div id="stickKnob"></div></div>
+      <div id="throttle">
+        <div id="btnUp" class="tbtn">+</div>
+        <div id="btnDown" class="tbtn">−</div>
+      </div>
+      <div id="btnFire">TULI</div>
+    </div>
+
+    <!-- Phones only: the HUD and the stick both need the long edge. -->
+    <div id="rotate" class="screen hidden">
+      <div class="panel">
+        <h1>📱 ↻</h1>
+        <p class="sub">Keera telefon külili</p>
       </div>
     </div>
 

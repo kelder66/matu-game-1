@@ -5,27 +5,27 @@ import { FLIGHT } from './protocol.js';
 
 const EARTH_R = 6378137;
 
-/** What the flight model reads each step. Keyboard on the client, AI on the server. */
+/**
+ * What the flight model reads each step. Keyboard and touch on the client, AI on
+ * the server.
+ *
+ * Axes are analog in [-1, 1] rather than boolean pairs, so a thumbstick can command
+ * a gentle bank. A key (or the AI) simply pushes the axis to a full +/-1, which is
+ * arithmetically identical to the old boolean pairs -- worth knowing, because the
+ * NPC difficulty tiers are tuned against measured behaviour that must not shift.
+ */
 export interface Input {
-  up: boolean;
-  down: boolean;
-  left: boolean;
-  right: boolean;
-  faster: boolean;
-  slower: boolean;
+  /** + = bank right, - = bank left. */
+  roll: number;
+  /** + = nose up, - = nose down. */
+  pitch: number;
+  /** + = faster, - = slower. */
+  throttle: number;
   fire: boolean;
 }
 
 export function createInput(): Input {
-  return {
-    up: false,
-    down: false,
-    left: false,
-    right: false,
-    faster: false,
-    slower: false,
-    fire: false,
-  };
+  return { roll: 0, pitch: 0, throttle: 0, fire: false };
 }
 
 export interface FlightState {
@@ -57,8 +57,9 @@ const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 export function integrate(s: FlightState, i: Input, groundAlt: number, dt: number) {
   dt = Math.min(dt, 0.1); // a backgrounded tab must not teleport us through the planet
 
-  // Roll: the keys command a bank angle, the aircraft eases toward it.
-  const bankCmd = (i.right ? 1 : 0) - (i.left ? 1 : 0);
+  // Roll: the stick commands a bank angle, the aircraft eases toward it. A key or
+  // the AI pushes this to +/-1, giving exactly the old full-deflection behaviour.
+  const bankCmd = clamp(i.roll, -1, 1);
   if (bankCmd !== 0) {
     const target = bankCmd * FLIGHT.MAX_BANK;
     const step = FLIGHT.ROLL_RATE * dt;
@@ -69,7 +70,7 @@ export function integrate(s: FlightState, i: Input, groundAlt: number, dt: numbe
   }
 
   // Pitch.
-  const pitchCmd = (i.up ? 1 : 0) - (i.down ? 1 : 0);
+  const pitchCmd = clamp(i.pitch, -1, 1);
   if (pitchCmd !== 0) s.pitch += pitchCmd * FLIGHT.PITCH_RATE * dt;
   else s.pitch -= s.pitch * (1 - Math.exp(-FLIGHT.PITCH_RECENTER * dt));
   s.pitch = clamp(s.pitch, -FLIGHT.MAX_PITCH, FLIGHT.MAX_PITCH);
@@ -79,7 +80,7 @@ export function integrate(s: FlightState, i: Input, groundAlt: number, dt: numbe
   s.heading = wrapPi(s.heading + turnRate * dt);
 
   // Throttle.
-  const thr = (i.faster ? 1 : 0) - (i.slower ? 1 : 0);
+  const thr = clamp(i.throttle, -1, 1);
   s.speed = clamp(
     s.speed + thr * FLIGHT.THROTTLE_ACCEL * dt,
     FLIGHT.SPEED_MIN,

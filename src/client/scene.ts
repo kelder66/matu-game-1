@@ -45,14 +45,21 @@ export interface World3D {
   snapCamera(): void;
 }
 
+/** Phones have a fraction of the fill rate and bandwidth of a laptop. */
+const isMobile = () => window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+
 export function createWorld(canvas: HTMLCanvasElement, apiKey: string | null): World3D {
+  const mobile = isMobile();
+
   const renderer = new WebGLRenderer({
     canvas,
-    antialias: true,
+    // Antialiasing is the single most expensive flag on a mobile GPU, and at phone
+    // pixel densities the jaggies barely show.
+    antialias: !mobile,
     // far/near reaches ~26,000 at altitude; without this the depth buffer collapses.
     logarithmicDepthBuffer: true,
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, mobile ? 1.5 : 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
 
   const scene = new Scene();
@@ -69,7 +76,7 @@ export function createWorld(canvas: HTMLCanvasElement, apiKey: string | null): W
   let fallback: FallbackWorld | null = null;
 
   if (apiKey) {
-    tiles = createTiles(apiKey, camera, renderer);
+    tiles = createTiles(apiKey, camera, renderer, mobile);
     scene.add(tiles.group);
   } else {
     fallback = createFallbackWorld(scene);
@@ -148,6 +155,7 @@ function createTiles(
   apiKey: string,
   camera: PerspectiveCamera,
   renderer: WebGLRenderer,
+  mobile: boolean,
 ): TilesRenderer {
   const tiles = new TilesRenderer();
 
@@ -176,12 +184,15 @@ function createTiles(
   //
   // Google bills Photorealistic 3D Tiles per ROOT TILESET REQUEST -- one charge per
   // ~3 h session, NOT per tile. Lowering this costs bandwidth and VRAM, not money.
-  tiles.errorTarget = 12; // raise to 16-20 if a weaker GPU struggles
-  tiles.downloadQueue.maxJobs = 18; // Google's guidance; library default is 25
-  tiles.parseQueue.maxJobs = 5; // library default -- DRACO decode is the bottleneck
+  // On a phone the same 12 means several times the geometry per screen pixel, on a
+  // GPU and a mobile connection that cannot feed it -- hence the softer target.
+  tiles.errorTarget = mobile ? 22 : 12; // raise if a weaker GPU struggles
+  tiles.downloadQueue.maxJobs = mobile ? 10 : 18; // Google suggests 18; library default 25
+  tiles.parseQueue.maxJobs = mobile ? 3 : 5; // library default 5 -- DRACO decode is the bottleneck
   // 400 MB is exactly the library default, so the old line here did nothing. A bigger
-  // cache is what stops the same street re-downloading every time we circle back.
-  tiles.lruCache.maxBytesSize = 800 * 1024 * 1024;
+  // cache is what stops the same street re-downloading every time we circle back;
+  // on a phone that much texture memory is a crash risk instead.
+  tiles.lruCache.maxBytesSize = (mobile ? 250 : 800) * 1024 * 1024;
 
   tiles.setCamera(camera);
   tiles.setResolutionFromRenderer(camera, renderer);

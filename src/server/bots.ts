@@ -122,10 +122,11 @@ export function steer(b: Bot, aim: typeof _aim, d: Tuning, now: number, targetSp
     bankWant = clamp(bankWant, -maxBank, maxBank);
   }
 
-  // `right` eases roll toward +MAX_BANK, and +roll gives +turnRate gives +heading.
-  // The 0.06 deadband stops the controls chattering every tick.
-  i.right = b.fs.roll < bankWant - 0.06;
-  i.left = b.fs.roll > bankWant + 0.06;
+  // Full deflection only: +1 eases roll toward +MAX_BANK, and +roll gives +turnRate
+  // gives +heading. The 0.06 deadband stops the controls chattering every tick.
+  // Deliberately still bang-bang -- the difficulty tiers are tuned against measured
+  // behaviour, and going proportional here would invalidate all of it.
+  i.roll = b.fs.roll < bankWant - 0.06 ? 1 : b.fs.roll > bankWant + 0.06 ? -1 : 0;
 
   // --- Pitch ---
   // In this flight model pitch is world-referenced (alt += speed*sin(pitch)*dt,
@@ -136,8 +137,7 @@ export function steer(b: Bot, aim: typeof _aim, d: Tuning, now: number, targetSp
   if (b.fs.alt > NPC.MAX_ALT) bias -= (b.fs.alt - NPC.MAX_ALT) / 300;
 
   const pitchWant = clamp(aim.elevation + bias, -FLIGHT.MAX_PITCH * 0.8, FLIGHT.MAX_PITCH * 0.8);
-  i.up = b.fs.pitch < pitchWant - 0.04;
-  i.down = b.fs.pitch > pitchWant + 0.04;
+  i.pitch = b.fs.pitch < pitchWant - 0.04 ? 1 : b.fs.pitch > pitchWant + 0.04 ? -1 : 0;
 
   // --- Throttle ---
   // Turn radius is v^2/(g tan bank), so a faster bot turns wider. Bleeding speed is
@@ -166,8 +166,7 @@ export function steer(b: Bot, aim: typeof _aim, d: Tuning, now: number, targetSp
   }
   wantSpd = clamp(wantSpd, FLIGHT.SPEED_MIN, d.maxSpeed);
 
-  i.faster = b.fs.speed < wantSpd - 4;
-  i.slower = b.fs.speed > wantSpd + 4;
+  i.throttle = b.fs.speed < wantSpd - 4 ? 1 : b.fs.speed > wantSpd + 4 ? -1 : 0;
 }
 
 export interface BotTarget {
