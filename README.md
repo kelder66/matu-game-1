@@ -42,6 +42,11 @@ Lisa URL-i lõppu `?touch`, et puutejuhtimist ka arvutis proovida.
 Maapind ei tapa — kui lendad liiga madalale, lennuk lihtsalt ei lähe allapoole.
 Ainult kuulid tapavad.
 
+Madalaim lubatud kõrgus on **40 m maapinnast**, ehk katuseid saab riivata. See on
+võimalik ainult tänu sellele, et maapinna tuvastus vaatab **1,6 s ette** (mitte
+ainult otse alla) ja tõuseb kiiresti, aga laskub aeglaselt — vastasel juhul lendaks
+130 m/s juures katusest läbi enne, kui jõuab tõusta.
+
 ## Robotid
 
 Kaks halli robotlennukit jahivad mängijaid. Nad ei tulista teineteist ja neid saab
@@ -69,7 +74,7 @@ nurgaga ei muutu nad raskemaks, vaid täiesti kahjutuks (0 tabamust 90 sekundiga
 Seepärast on robotite oskus `aimError`-is ja tabamustõenäosuses, mitte nurgas.
 
 Kaks garanteeritud pääseteed, mille Matu ise avastab: robotid **ei lenda alla 240 m**
-ega **üle 3000 m**, ja nende max kiirus on alati väiksem kui sinu 220 m/s. Nad ka
+(sina saad 40 m peale) ega **üle 3000 m**, ja nende max kiirus on alati väiksem kui sinu 220 m/s. Nad ka
 loobuvad, kui viid nad 12 km kaugusele keskusest.
 
 Raskust saab muuta **igaüks igal ajal** (avaekraanil või klahviga `F`) ja see kehtib

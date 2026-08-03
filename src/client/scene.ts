@@ -110,15 +110,22 @@ export function createWorld(canvas: HTMLCanvasElement, apiKey: string | null): W
       camera.updateMatrixWorld();
 
       if (tiles) {
+        // Sample faster the lower we are: down at the 40 m floor the plane covers
+        // 26 m between 5 Hz samples, which is a whole rooftop.
         probeAccum += dt;
-        if (probeAccum > 0.2) {
+        const agl = state.alt - world.groundAlt;
+        if (probeAccum > (agl < 250 ? 0.06 : 0.2)) {
           probeAccum = 0;
           probeTerrain(tiles, state, raycaster, probeUp, probeOrigin, (alt) => {
             groundTarget = alt;
           });
         }
-        // Ease toward the sample so a cliff edge doesn't make the floor stutter.
-        world.groundAlt += (groundTarget - world.groundAlt) * (1 - Math.exp(-3 * dt));
+        // Asymmetric on purpose: rising ground has to be obeyed almost at once or we
+        // fly through the roof, but falling ground must be let go of slowly, or the
+        // floor drops out from under the aircraft the moment it crosses a rooftop
+        // edge and it lurches. Climb fast, sink slow.
+        const rate = groundTarget > world.groundAlt ? 12 : 1.5;
+        world.groundAlt += (groundTarget - world.groundAlt) * (1 - Math.exp(-rate * dt));
         // Stop streaming while the tab is hidden -- saves CPU, bandwidth and battery.
         if (!document.hidden) tiles.update();
       } else if (fallback) {
@@ -204,6 +211,21 @@ function createTiles(
 type Raycastable = { raycast(raycaster: Raycaster, intersects: Intersection[]): void };
 type FirstHitRaycaster = Raycaster & { firstHitOnly?: boolean };
 
+/** How far ahead to look, in seconds of travel. */
+const PROBE_LOOKAHEAD_S = 1.6;
+
+const _down = new Vector3();
+const _hits: Intersection[] = [];
+
+/**
+ * Sample the ground under AND in front of the aircraft, and report the higher of the
+ * two.
+ *
+ * Looking straight down is enough at a few hundred metres, but the floor is 40 m AGL
+ * and the plane covers 130 m every second: by the time a rooftop is underneath, it is
+ * far too late to climb over it. Probing a second and a half ahead is what makes
+ * skimming a city survivable.
+ */
 function probeTerrain(
   tiles: TilesRenderer,
   state: FlightState,
@@ -213,15 +235,32 @@ function probeTerrain(
   onHit: (alt: number) => void,
 ) {
   surfaceNormal(state.lat, state.lon, up);
-  // Start 200 m above the plane and shoot straight down.
-  origin.copy(up).multiplyScalar(EARTH_R + state.alt + 200);
-  raycaster.set(origin, up.clone().negate());
-  raycaster.far = 20000;
-  (raycaster as FirstHitRaycaster).firstHitOnly = true;
+  _down.copy(up).negate();
 
-  const hits: Intersection[] = [];
-  (tiles as unknown as Raycastable).raycast(raycaster, hits);
-  if (hits.length) onHit(elevationAt(hits[0].point));
+  const cast = (lat: number, lon: number): number | null => {
+    surfaceNormal(lat, lon, up);
+    // Start well above the aircraft so the ray cannot begin inside a building.
+    origin.copy(up).multiplyScalar(EARTH_R + state.alt + 300);
+    raycaster.set(origin, up.clone().negate());
+    raycaster.far = 20000;
+    (raycaster as FirstHitRaycaster).firstHitOnly = true;
+
+    _hits.length = 0;
+    (tiles as unknown as Raycastable).raycast(raycaster, _hits);
+    return _hits.length ? elevationAt(_hits[0].point) : null;
+  };
+
+  const here = cast(state.lat, state.lon);
+
+  // A point LOOKAHEAD seconds along the current ground track.
+  const reach = state.speed * PROBE_LOOKAHEAD_S;
+  const rEff = EARTH_R + state.alt;
+  const aheadLat = state.lat + (reach * Math.cos(state.heading)) / rEff;
+  const aheadLon = state.lon + (reach * Math.sin(state.heading)) / (rEff * Math.cos(state.lat));
+  const ahead = cast(aheadLat, aheadLon);
+
+  const best = here === null ? ahead : ahead === null ? here : Math.max(here, ahead);
+  if (best !== null) onHit(best);
 }
 
 // --- Chase camera ---

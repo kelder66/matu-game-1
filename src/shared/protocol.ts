@@ -39,7 +39,12 @@ export const FLIGHT = {
   PITCH_RECENTER: 0.9, // 1/s exponential decay
   MAX_PITCH: 0.87, // 50 deg -- never inverted
   G: 9.81,
-  MIN_AGL: 120, // metres above sampled ground
+  /**
+   * Metres above the sampled ground. Low enough to skim rooftops on purpose -- that
+   * is most of the fun -- which is only safe because the terrain probe looks AHEAD
+   * of the aircraft and climbs faster than it descends (see probeTerrain).
+   */
+  MIN_AGL: 40,
   MAX_ALT: 12000,
   MAX_LAT: 1.4835, // +-85 deg, stay off the poles
 } as const;
@@ -70,10 +75,14 @@ export const NPC = {
    * Metres above the ELLIPSOID that NPCs treat as the ground. The server has no
    * terrain data, so this is a hand-set floor for the current WORLD_CENTER
    * (Helsinki: geoid separation ~+19 m, tallest structure ~134 m). FLIGHT.MIN_AGL
-   * stacks on top, so NPCs bottom out around 240 m. Moving the world means
+   * stacks on top, so NPCs bottom out around 240 m.
+   *
+   * Deliberately NOT tied to MIN_AGL: the player was let down to 40 m AGL, and
+   * following them down would have quietly deleted the escape hatch (dive below the
+   * robots) and invalidated the measured difficulty tiers. Moving the world means
    * revisiting this number.
    */
-  GROUND_ALT: 120,
+  GROUND_ALT: 200,
   /** Soft band: outside it the AI biases its pitch back toward the middle. */
   MIN_ALT: 350,
   MAX_ALT: 3000,
