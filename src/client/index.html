@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="et">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Matu lennumäng</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✈️</text></svg>" />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+
+    <!-- Name entry -->
+    <div id="start" class="screen">
+      <div class="panel">
+        <h1>✈️ Matu lennumäng</h1>
+        <p class="sub">Lenda päris maailma kohal. Kuni 5 pilooti korraga.</p>
+        <input id="name" type="text" maxlength="12" placeholder="Sinu nimi" autocomplete="off" />
+        <button id="fly">LENDA</button>
+        <p id="startError" class="error"></p>
+        <div class="keys">
+          <span><b>↑ ↓</b> nina üles / alla</span>
+          <span><b>← →</b> kaldu ja pööra</span>
+          <span><b>Shift / Ctrl</b> kiiremini / aeglasemalt</span>
+          <span><b>Tühik</b> tulista</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- In-game HUD -->
+    <div id="hud" class="hidden">
+      <div id="crosshair"></div>
+      <div id="nametags"></div>
+      <div id="arrow" class="hidden"><span id="arrowGlyph">▲</span><span id="arrowDist"></span></div>
+
+      <div id="damage">
+        <div class="label">TERVIS</div>
+        <div id="pips"></div>
+      </div>
+
+      <div id="roster"></div>
+
+      <div id="readout">
+        <div><span id="speed">0</span> km/h</div>
+        <div><span id="alt">0</span> m</div>
+      </div>
+
+      <div id="attribution"></div>
+      <div id="offlineBadge" class="hidden">OFFLINE KAART (API võtit pole)</div>
+      <div id="hitFlash"></div>
+    </div>
+
+    <!-- Death overlay -->
+    <div id="dead" class="screen hidden">
+      <div class="panel">
+        <h1>💥 PLAHVATUS!</h1>
+        <p id="killedBy" class="sub"></p>
+        <button id="again">LENDA UUESTI</button>
+      </div>
+    </div>
+
+    <!-- Disconnect overlay -->
+    <div id="lost" class="screen hidden">
+      <div class="panel">
+        <h1>Ühendus katkes</h1>
+        <p class="sub">Server ei vasta.</p>
+        <button onclick="location.reload()">PROOVI UUESTI</button>
+      </div>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
