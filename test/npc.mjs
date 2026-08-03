@@ -9,6 +9,12 @@
 // assertion. Re-run before believing a failure; investigate if it fails twice.
 // The structural assertions (altitude band, leash, separation, respawn) are stable.
 import { WebSocket } from 'ws';
+import {
+  DIFFICULTIES,
+  DIFFICULTY,
+  botMaxHitsPerSec,
+  humanMaxHitsPerSec,
+} from '../dist/shared/protocol.js';
 
 const URL = process.env.TEST_WS || 'ws://localhost:3100/ws';
 const D = Math.PI / 180;
@@ -114,6 +120,31 @@ class Client {
     this.ws.close();
   }
 }
+
+// --- 0. tuning invariants (pure arithmetic, no server needed) ---
+// A robot must always be a worse shot than a person, at every difficulty.
+for (const level of DIFFICULTIES) {
+  const d = DIFFICULTY[level];
+  check(
+    `${level}: a bot can never out-shoot a human`,
+    botMaxHitsPerSec(d) < humanMaxHitsPerSec(),
+    `bot ${botMaxHitsPerSec(d).toFixed(2)}/s vs human ${humanMaxHitsPerSec().toFixed(1)}/s ` +
+      `(${(humanMaxHitsPerSec() / botMaxHitsPerSec(d)).toFixed(1)}x margin)`,
+  );
+  check(`${level}: bot hit roll is never certain`, d.hitChance < 1, `hitChance ${d.hitChance}`);
+  check(
+    `${level}: a bot can never outrun or outrange a player`,
+    d.maxSpeed < 220 && d.range < 1500,
+    `speed ${d.maxSpeed}/220, range ${d.range}/1500`,
+  );
+}
+// Difficulty must tighten the player's own gunsight, not just the robots.
+check(
+  'your aim tube shrinks as difficulty rises',
+  DIFFICULTY.easy.hitRadius > DIFFICULTY.medium.hitRadius &&
+    DIFFICULTY.medium.hitRadius > DIFFICULTY.hard.hitRadius,
+  `${DIFFICULTY.easy.hitRadius} > ${DIFFICULTY.medium.hitRadius} > ${DIFFICULTY.hard.hitRadius} m`,
+);
 
 const a = new Client('Matu');
 const w = await a.ready;

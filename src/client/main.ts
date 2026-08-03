@@ -3,6 +3,7 @@ import {
   COMBAT,
   DEFAULT_DIFFICULTY,
   DIFFICULTIES,
+  DIFFICULTY,
   TICK_MS,
   type Difficulty,
   type Spawn,
@@ -112,9 +113,17 @@ function startGame(rawName: string) {
       respawnSelf(spawn);
       // Add ?debug to the URL to poke at the scene from the console.
       if (location.search.includes('debug')) {
-        (window as unknown as { game: unknown }).game = { world, net, myPlane, get state() {
-          return state;
-        } };
+        (window as unknown as { game: unknown }).game = {
+          world,
+          net,
+          myPlane,
+          get state() {
+            return state;
+          },
+          get aimRadius() {
+            return DIFFICULTY[net.difficulty].hitRadius;
+          },
+        };
       }
       lastTime = performance.now();
       requestAnimationFrame(frame);
@@ -306,7 +315,8 @@ function shoot(dt: number) {
     seen: r.seen,
   }));
 
-  const hitId = findTarget(myPlane.position, forward, targets);
+  // Your own aim forgiveness follows the shared difficulty setting.
+  const hitId = findTarget(myPlane.position, forward, targets, DIFFICULTY[net.difficulty].hitRadius);
   if (hitId) {
     net.send({ t: 'hit', targetId: hitId });
     hud.flashLock(); // instant local feedback; the server decides the damage

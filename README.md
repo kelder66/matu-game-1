@@ -31,11 +31,26 @@ Ainult kuulid tapavad.
 Kaks halli robotlennukit jahivad mängijaid. Nad ei tulista teineteist ja neid saab
 alla lasta nagu iga teist lennukit (tulevad 5 s pärast tagasi).
 
-| Raskus | Mida see muudab |
-|---|---|
-| **KERGE** | Aeglane, kaldub laisalt, sihib 11° kõrvale, ei hoia ette. Testis ei suutnud 2 minutiga alla tulistada. |
-| **KESKMINE** | Aus võitlus — pöörab umbes sama järsult kui sina. Testis ~16 s surmani. |
-| **RASKE** | Pöörab sinust 2× järsemalt, sihib täpselt, tulistab 3× tihedamini. Testis ~13 s. |
+**Raskus ei muuda ainult roboteid — see muudab ka sinu enda sihikut.** Mida raskem,
+seda täpsemalt pead ise nina peale saama, et pihta anda. See kehtib ka mängija-vastu-
+mängija lahingus.
+
+| Raskus | Sinu sihiku laius | Robotid |
+|---|---|---|
+| **KERGE** | 65 m — andestab lohaka sihtimise | Aeglased, kalduvad laisalt, sihivad 11° kõrvale, ei hoia ette. Testis ei suutnud 2 minutiga alla tulistada. |
+| **KESKMINE** | 40 m | Aus võitlus — pöörab umbes sama järsult kui sina. Testis ~16 s surmani. |
+| **RASKE** | 25 m — pead päriselt sihtima | Pöörab sinust 2× järsemalt, sihib täpselt, tulistab 3× tihedamini. Testis ~13 s. |
+
+**Robot on alati kehvem laskur kui inimene.** Sihikule saanud inimene tabab iga
+lasuga; robot peab ka siis veel õnne veeretama. Parimal juhul: inimene 10 tabamust
+sekundis, robot 0,75 (kerge) / 1,9 (keskmine) / 4,2 (raske) — ehk 13× kuni 2,4×
+kehvem, ja praktikas veel palju rohkem, sest robot hoiab sihikut vaid murdosa ajast.
+`npm run test:npc` kontrollib seda igal raskusastmel.
+
+Robotite *sihiku nurka* ei saa kitsamaks keerata: nende juhtimine on 20 Hz
+bang-bang, nii et nina ei püsi paigal täpsemalt kui ~3,4°. Mõõtsin — kitsama
+nurgaga ei muutu nad raskemaks, vaid täiesti kahjutuks (0 tabamust 90 sekundiga).
+Seepärast on robotite oskus `aimError`-is ja tabamustõenäosuses, mitte nurgas.
 
 Kaks garanteeritud pääseteed, mille Matu ise avastab: robotid **ei lenda alla 240 m**
 ega **üle 3000 m**, ja nende max kiirus on alati väiksem kui sinu 220 m/s. Nad ka

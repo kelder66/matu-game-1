@@ -47,9 +47,6 @@ export const FLIGHT = {
 export const COMBAT = {
   FIRE_INTERVAL: 0.1, // 10 rounds/s
   RANGE: 1500, // m
-  // Forgiving on purpose: with bank-to-turn controls and no mouse aim, a tighter
-  // tube than this is frustrating for a kid. 40 m at 1500 m is still only ~1.5 deg.
-  HIT_RADIUS: 40, // m
   TRACER_SPEED: 900, // m/s (visual only)
   /** Server-side leniency on top of RANGE, for latency. */
   SERVER_RANGE: 2000,
@@ -81,11 +78,16 @@ export const NPC = {
   MIN_ALT: 350,
   MAX_ALT: 3000,
   /**
-   * Half-angle of the firing cone. Deliberately much wider than a player's tube:
-   * the AI steers with bang-bang controls at 20 Hz, so its nose oscillates and a
-   * 5 deg cone measured out at a 2% duty cycle -- the bots looked busy and were
-   * completely harmless. Hit *probability* (per tier) is the real damage knob;
-   * this only decides when they bother pulling the trigger.
+   * When a bot bothers pulling the trigger. This is NOT a skill knob -- it is the
+   * floor of what the controller can physically hold: bang-bang steering at 20 Hz
+   * with a 0.06 rad roll deadband means the nose is never steadier than ~3.4 deg,
+   * and it wanders far wider than that while manoeuvring.
+   *
+   * Measured, tightening it destroys the bots rather than challenging them:
+   *   cone 17 deg -> easy survives, medium 16 s, hard 13 s to kill (good)
+   *   cone 15/9/6 deg by tier -> 1-4 hits in 90 s at every tier, nobody dies
+   *   full human tube (25 m at range on RASKE, ~3 deg) -> zero hits in 90 s
+   * So bot SKILL lives in aimError, hitChance and fireIntervalMs, not here.
    */
   FIRE_CONE: 0.3, // rad, ~17 deg
   /** Two bots closer than this nudge apart, so they don't fly as one plane. */
@@ -118,6 +120,10 @@ export const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard'];
  */
 export const DIFFICULTY = {
   easy: {
+    // Your OWN aim tube, metres. Bigger = your bullets forgive a sloppier line-up,
+    // so the setting changes player-vs-player as much as it changes the robots.
+    // 65 m is ~7.4 deg at 500 m; 25 m is ~2.9 deg.
+    hitRadius: 65,
     turnFactor: 0.7, // x FLIGHT.MAX_BANK -> 42 deg -> 1363 m turn radius
     aimError: 0.2, // rad (11 deg) -- the nose wanders well off target
     fireIntervalMs: 600,
@@ -132,6 +138,7 @@ export const DIFFICULTY = {
     evadeMs: 3500,
   },
   medium: {
+    hitRadius: 40,
     turnFactor: 0.85, // 51 deg -> 906 m
     aimError: 0.09,
     fireIntervalMs: 320,
@@ -146,6 +153,7 @@ export const DIFFICULTY = {
     evadeMs: 2500,
   },
   hard: {
+    hitRadius: 25,
     turnFactor: 1.0, // 60 deg -> 528 m, out-turns the player 2:1
     aimError: 0.025,
     fireIntervalMs: 190,
@@ -162,6 +170,27 @@ export const DIFFICULTY = {
 } as const;
 
 export type Tuning = (typeof DIFFICULTY)[Difficulty];
+
+/**
+ * Best case hits per second with the target perfectly lined up the whole time.
+ *
+ * This is THE guarantee that a robot is always a worse shot than a person, at every
+ * difficulty: a lined-up human lands every single round, while a bot must still pass
+ * hitChance, which is below 1 on every tier. The margin is large -- 13x on KERGE,
+ * 2.4x even on RASKE -- and in practice much larger still, because a bot only holds
+ * a firing solution a few percent of the time while a player can simply aim.
+ *
+ * It is expressed here rather than as a tighter gunsight because the gunsight route
+ * was tried and measured: it does not make bots harder, it makes them harmless
+ * (see NPC.FIRE_CONE). test/npc.mjs asserts this holds for every tier.
+ */
+export function botMaxHitsPerSec(d: Tuning): number {
+  return (1000 / d.fireIntervalMs) * d.hitChance;
+}
+
+export function humanMaxHitsPerSec(): number {
+  return 1 / COMBAT.FIRE_INTERVAL;
+}
 
 export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
   easy: 'KERGE',

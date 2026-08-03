@@ -245,7 +245,11 @@ export function applyLeash(b: Bot, aim: typeof _aim, leashed: boolean): boolean 
   return leashed;
 }
 
-/** Is the target inside the firing cone and in range? */
+/**
+ * Is the target lined up well enough to shoot? Skill lives in aimError (which biases
+ * where the nose settles) and in the hitChance roll, not in this angle -- see the
+ * measurements on NPC.FIRE_CONE.
+ */
 export function canFire(b: Bot, aim: typeof _aim, d: Tuning): boolean {
   if (aim.range > d.range) return false;
   const off = Math.hypot(wrapPi(aim.bearing - b.fs.heading), aim.elevation - b.fs.pitch);

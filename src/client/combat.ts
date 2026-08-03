@@ -243,13 +243,15 @@ export class Explosions {
 const _rel = new Vector3();
 
 /**
- * Sphere-cast down the nose. A narrow cone would be 52 m wide at 1500 m and feel
- * like a homing beam; a fixed-radius tube is honest and forgiving.
+ * Sphere-cast down the nose. A tube rather than a cone: a cone gets wider with
+ * range and feels like a homing beam. `hitRadius` comes from the difficulty
+ * setting, so KERGE forgives a sloppy line-up and RASKE does not.
  */
 export function findTarget(
   myPos: Vector3,
   forward: Vector3,
   targets: Iterable<{ id: string; pos: Vector3; alive: boolean; seen: boolean }>,
+  hitRadius: number,
 ): string | null {
   let bestId: string | null = null;
   let bestDist = Infinity;
@@ -260,7 +262,7 @@ export function findTarget(
     const along = _rel.dot(forward);
     if (along <= 0 || along > COMBAT.RANGE) continue;
     const perp = Math.sqrt(Math.max(0, _rel.lengthSq() - along * along));
-    if (perp > COMBAT.HIT_RADIUS) continue;
+    if (perp > hitRadius) continue;
     if (along < bestDist) {
       bestDist = along;
       bestId = t.id;
