@@ -597,11 +597,25 @@ button:active {
   display: block;
   font-style: normal;
   font-size: 9px;
-  letter-spacing: 0;
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
+
+/* Green = real buildings, amber = terrain and satellite imagery only. */
+.seg button i.is3d {
+  color: #46d16a;
+}
+
+.seg button i.is2d {
   color: #ffcc66;
 }
 
-.seg button.on i {
+.seg button.on i.is3d {
+  color: #b6f2c6;
+}
+
+.seg button.on i.is2d {
   color: #ffe9b0;
 }
 
@@ -618,10 +632,15 @@ button:active {
   transition: color 0.3s;
 }
 
+#cityBadge::after {
+  content: " 3D";
+  color: #46d16a;
+  font-size: 10px;
+}
+
 #cityBadge.flat::after {
-  content: " (lame kaart)";
+  content: " 2D";
   color: #ffcc66;
-  font-weight: 400;
 }
 
 #cityBadge.changed {

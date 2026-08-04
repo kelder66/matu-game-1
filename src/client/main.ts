@@ -139,9 +139,11 @@ async function main() {
     const b = document.createElement('button');
     b.type = 'button';
     b.dataset.city = c.id;
-    // Tallinn has terrain but no photogrammetry -- say so rather than let a kid
-    // pick his home town and wonder why it looks flat.
-    b.innerHTML = c.buildings3D ? c.name : `${c.name}<i>lame</i>`;
+    // Label every city, not just the odd one out: "3D" vs "2D" tells you what you
+    // are choosing, whereas flagging only Tallinn left the rest ambiguous.
+    b.innerHTML = `${c.name}<i class="${c.buildings3D ? 'is3d' : 'is2d'}">${
+      c.buildings3D ? '3D' : '2D'
+    }</i>`;
     cityPick.appendChild(b);
   }
   const paintCity = () => {
@@ -310,16 +312,39 @@ function refreshRoster() {
 
 // --- Frame loop ---
 
+/**
+ * Longest simulation step allowed in one go. Beyond this the integrator gets
+ * inaccurate (and the terrain floor can be crossed inside a single step).
+ */
+const MAX_STEP = 0.05;
+/**
+ * Most simulated time one frame may cover. This is the tab-switch guard: come back
+ * after a minute away and the plane advances half a second, not a minute.
+ */
+const MAX_FRAME = 0.5;
+
 function frame(now: number) {
   requestAnimationFrame(frame);
 
-  const dt = Math.min((now - lastTime) / 1000, 0.1);
+  const dt = Math.min((now - lastTime) / 1000, MAX_FRAME);
   lastTime = now;
 
   syncInput(); // merge keyboard and touch before anything reads `input`
 
   if (alive) {
-    integrate(state, input, world.groundAlt, dt);
+    // Sub-step rather than clamp. A single clamped step silently threw away time
+    // whenever the frame rate dropped -- at 5 fps the old 0.1 s cap meant the plane
+    // simulated 0.5 s per wall-clock second and genuinely flew at half speed, which
+    // is exactly what a phone struggling with the tiles would do. Splitting the
+    // frame into short steps keeps the aircraft moving at its real speed all the way
+    // down to ~2 fps, while MAX_FRAME still stops a backgrounded tab teleporting it
+    // across the planet. At 60 fps this is a single step, identical to before.
+    let remaining = dt;
+    while (remaining > 0) {
+      const step = Math.min(remaining, MAX_STEP);
+      integrate(state, input, world.groundAlt, step);
+      remaining -= step;
+    }
     applyPose(myPlane, state);
   }
 

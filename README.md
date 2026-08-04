@@ -10,10 +10,13 @@ ja lennuk plahvatab**.
 Avaekraanil valid linna; keegi saab seda ka keset mängu muuta, siis kolib **kogu
 maailm** korraga (kõik mängijad ja robotid teisaldatakse uue linna ringile).
 
-| Linn | 3D hooned |
+Iga linna nupul on märge: roheline **3D** = päris hooned ja puud, kollane **2D** =
+ainult reljeef ja satelliidipilt.
+
+| Linn | Märge |
 |---|---|
-| Helsingi, Pärnu, München, San Francisco, New York | jah |
-| **Tallinn** | **ei — ainult reljeef ja satelliidipilt** |
+| Helsingi, Pärnu, München, San Francisco, New York | **3D** |
+| Tallinn | **2D** |
 
 Google'i 3D-plaadid katavad reljeefi kogu maailmas, aga **hooneid ja puid ainult
 avaldatud aladel**. Eestis on need ainult Pärnu ja Haapsalu kandis. Tallinn on
@@ -58,13 +61,17 @@ Lisa URL-i lõppu `?touch`, et puutejuhtimist ka arvutis proovida.
 Maapind ei tapa — kui lendad liiga madalale, lennuk lihtsalt ei lähe allapoole.
 Ainult kuulid tapavad.
 
-**Kiirusnäidik näitab tegelikku kiirust üle maa**, mitte lennuki nominaalset
-õhkkiirust. Need ei ole sama asi: `integrate()` piirab ajasammu 0,1 sekundiga, et
-taustal olev vahekaart ei teleporteeriks lennukit läbi planeedi — aga see tähendab,
-et **alla ~10 kaadri sekundis lendab lennuk päriselt aeglasemalt** kui nominaalne
-kiirus lubab. Mõõdetud 3 fps juures: nominaalne 720 km/h, tegelik 133 km/h. Näidik
-mõõdab nüüd päris läbitud vahemaad sekundis, nii et see ei valeta — ja langeb ka
-õigesti tõusul/sukeldumisel, kus ainult horisontaalne osa on kiirus üle maa.
+**Kiirusnäidik näitab tegelikku kiirust üle maa** — see mõõdab päris läbitud
+vahemaad sekundis, mitte lennuki nominaalset õhkkiirust. Nii ei saa see valetada ja
+langeb ka õigesti tõusul/sukeldumisel, kus ainult horisontaalne osa on kiirus üle
+maa.
+
+Simulatsioon jaguneb **alamsammudeks** (`MAX_STEP` failis `main.ts`). Varem lõikas
+üksainus 0,1 s klamber madala kaadrisageduse juures aega maha ja lennuk lendas
+päriselt aeglasemalt kui näidik lubas — telefonis, kus plaadid koormavad GPU-d, oli
+see selgelt näha. Mõõdetud 3 fps juures: enne 101 km/h, nüüd 384 km/h (nominaalne
+720). `MAX_FRAME` 0,5 s hoiab endiselt ära selle, et taustal olnud vahekaart
+lennukit üle planeedi teleporteeriks.
 
 Madalaim lubatud kõrgus on **40 m maapinnast**, ehk katuseid saab riivata. See on
 võimalik ainult tänu sellele, et maapinna tuvastus vaatab **1,6 s ette** (mitte
