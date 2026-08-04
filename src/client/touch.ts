@@ -46,6 +46,20 @@ export function initTouchControls() {
   setupHold(root.querySelector('#btnFire') as HTMLElement, (on) => (touch.fire = on));
   setupHold(root.querySelector('#btnUp') as HTMLElement, (on) => (touch.throttle = on ? 1 : 0));
   setupHold(root.querySelector('#btnDown') as HTMLElement, (on) => (touch.throttle = on ? -1 : 0));
+
+  // A touch that ends while the page is hidden never reports a pointerup.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) releaseAllTouchControls();
+  });
+  window.addEventListener('blur', releaseAllTouchControls);
+
+  // iOS ignores user-scalable=no, so pinch-zoom has to be refused explicitly. Without
+  // this, a thumb that misses the fire button and lands on the canvas can double-tap
+  // or pinch the whole page into a corner mid-flight.
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+    document.addEventListener(type, (e) => e.preventDefault());
+  }
+  document.addEventListener('dblclick', (e) => e.preventDefault());
 }
 
 function setupStick(base: HTMLElement, knob: HTMLElement) {
@@ -64,9 +78,6 @@ function setupStick(base: HTMLElement, knob: HTMLElement) {
     if (id !== null) return;
     id = e.pointerId;
     capture(base, e.pointerId);
-    // Anchor to where the thumb actually landed, not the centre of the pad: a kid
-    // never puts their thumb exactly on the middle, and a jump on first touch feels
-    // like the plane twitched.
     const r = base.getBoundingClientRect();
     originX = r.left + r.width / 2;
     originY = r.top + r.height / 2;
@@ -74,17 +85,26 @@ function setupStick(base: HTMLElement, knob: HTMLElement) {
     e.preventDefault();
   });
 
-  base.addEventListener('pointermove', (e) => {
+  // Move and release are tracked on WINDOW, not on the pad.
+  //
+  // Listening on the element alone is how the stick got stuck: the finger leaves the
+  // 148 px circle, the browser retargets or drops the events, no pointerup ever
+  // reaches the pad, `id` stays set, and every later pointerdown returns early --
+  // a dead stick frozen at its last deflection, while the fire button (its own
+  // pointer) kept working. `pointerleave` used to be in the release list too, which
+  // reset the stick mid-turn whenever a thumb strayed outside the circle.
+  window.addEventListener('pointermove', (e) => {
     if (e.pointerId !== id) return;
     move(e);
     e.preventDefault();
   });
 
-  for (const type of ['pointerup', 'pointercancel', 'pointerleave'] as const) {
-    base.addEventListener(type, (e) => {
-      if (e.pointerId === id) reset();
-    });
-  }
+  const end = (e: PointerEvent) => {
+    if (e.pointerId === id) reset();
+  };
+  window.addEventListener('pointerup', end);
+  window.addEventListener('pointercancel', end);
+  stickResets.push(reset);
 
   function move(e: PointerEvent) {
     let dx = (e.clientX - originX) / STICK_RADIUS;
@@ -118,6 +138,12 @@ function setupStick(base: HTMLElement, knob: HTMLElement) {
 function setupHold(el: HTMLElement, set: (on: boolean) => void) {
   let id: number | null = null;
 
+  const release = () => {
+    id = null;
+    el.classList.remove('down');
+    set(false);
+  };
+
   el.addEventListener('pointerdown', (e) => {
     if (id !== null) return;
     id = e.pointerId;
@@ -127,14 +153,31 @@ function setupHold(el: HTMLElement, set: (on: boolean) => void) {
     e.preventDefault();
   });
 
-  for (const type of ['pointerup', 'pointercancel', 'pointerleave'] as const) {
-    el.addEventListener(type, (e) => {
-      if (e.pointerId !== id) return;
-      id = null;
-      el.classList.remove('down');
-      set(false);
-    });
-  }
+  // Released on WINDOW for the same reason as the stick: a lift outside the button
+  // must still count. A throttle button stuck down is not merely unresponsive -- it
+  // pins the aircraft at minimum or maximum speed, which reads as "the plane is
+  // slow" rather than as a stuck control.
+  const end = (e: PointerEvent) => {
+    if (e.pointerId === id) release();
+  };
+  window.addEventListener('pointerup', end);
+  window.addEventListener('pointercancel', end);
+
+  holdResets.push(release);
+}
+
+/** Every control's release, so a lost pointer can be cleared wholesale. */
+const holdResets: (() => void)[] = [];
+const stickResets: (() => void)[] = [];
+
+/**
+ * Last-resort recovery. Switching apps mid-drag, an incoming call, or a gesture the
+ * OS steals can all end a touch without any event we ever see; a control left held
+ * would fly the plane into the ground on its own.
+ */
+export function releaseAllTouchControls() {
+  for (const r of holdResets) r();
+  for (const r of stickResets) r();
 }
 
 /**

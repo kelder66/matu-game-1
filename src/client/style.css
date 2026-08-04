@@ -25,6 +25,19 @@ body {
   /* dvh, not vh: iOS Safari's shrinking address bar makes vh taller than the
      visible area, which would push the touch controls off the bottom. */
   height: 100dvh;
+  /* touch-action is NOT inherited, so setting it on body did nothing here. A thumb
+     that missed the fire button landed on the canvas and the browser happily
+     double-tap-zoomed the whole game into a corner. */
+  touch-action: none;
+}
+
+/* Same reason: every layer a finger can land on has to refuse gestures itself. */
+#hud,
+#nametags,
+#minimap,
+.screen,
+.panel {
+  touch-action: none;
 }
 
 .hidden {
@@ -443,10 +456,10 @@ button:active {
 
 #btnFire {
   position: absolute;
-  right: 26px;
-  bottom: 26px;
-  width: 116px;
-  height: 116px;
+  right: 20px;
+  bottom: 20px;
+  width: 132px;
+  height: 132px;
   border-radius: 50%;
   background: #d8383866;
   border: 2px solid #ff6b6b;

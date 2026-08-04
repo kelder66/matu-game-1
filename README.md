@@ -56,6 +56,16 @@ Pöialnupp on **analoog** — pool väljalööki annab poole kaldest, nii et saa
 loivi kurvi, mitte ainult järsku pööret. Mõlemat pöialt saab korraga kasutada
 (pöörad ja tulistad ühtaegu).
 
+Puutejuhtimise kaks reeglit, mis said kalli õppetunni hinnaga selgeks:
+
+1. **Sõrme tõstmist kuulatakse `window` peal, mitte nupu peal.** Kui kuulata ainult
+   elemendi peal ja sõrm libiseb nupult ära, ei jõua `pointerup` kohale, juhtnupp
+   jääb igavesti "alla vajutatuks" ja lennuk lendab kinnijäänud kaldega. Kinni jäänud
+   gaasinupp ei tundu katkise nupuna — see tundub nii, nagu lennuk oleks aeglane.
+2. **`touch-action` ei päri.** `body` peal ei aita see canvas'it kuidagi; kui sõrm
+   tulistamisnupust mööda läheb, suumib brauser mängu nurka. Iga kiht, kuhu sõrm
+   maanduda saab, peab žestidest ise keelduma.
+
 Lisa URL-i lõppu `?touch`, et puutejuhtimist ka arvutis proovida.
 
 Maapind ei tapa — kui lendad liiga madalale, lennuk lihtsalt ei lähe allapoole.
