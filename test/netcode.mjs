@@ -7,6 +7,10 @@
 // Keeping bots out of the players map is what makes the 5-human cap assertion
 // structurally correct rather than accidentally passing.
 import { WebSocket } from 'ws';
+import { SPAWN_AGL_M, getCity } from '../dist/shared/protocol.js';
+
+// The server defaults to this city unless CITY is set in its environment.
+const CITY = getCity(process.env.CITY || 'helsinki');
 
 const URL = process.env.TEST_WS || 'ws://localhost:3100/ws';
 const D = Math.PI / 180;
@@ -65,8 +69,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const a = new Client('Matu');
 const wa = await a.ready;
 check('welcome received', wa.t === 'welcome');
-check('spawn near Helsinki', Math.abs(wa.spawn.lat / D - 60.17) < 0.05, `lat=${(wa.spawn.lat / D).toFixed(3)}`);
-check('spawn altitude 800', wa.spawn.alt === 800);
+check(`spawn near ${CITY.name}`, Math.abs(wa.spawn.lat / D - CITY.lat) < 0.05, `lat=${(wa.spawn.lat / D).toFixed(3)}`);
+check(
+  'spawn sits 700 m above the city ground',
+  wa.spawn.alt === CITY.groundAlt + SPAWN_AGL_M,
+  `${wa.spawn.alt} m (ground ${CITY.groundAlt})`,
+);
 
 const b = new Client('Kelder');
 const wb = await b.ready;
@@ -99,7 +107,7 @@ check('self-hit rejected', a.of('hit').length === 0);
 
 // --- 5. hit validation: distance rule ---
 // Put B 50 km away, then claim a hit.
-b.send({ t: 'state', lat: wb.spawn.lat + 0.5 * D, lon: wb.spawn.lon, alt: 800, hdg: 0, pit: 0, rol: 0, spd: 130, fire: 0 });
+b.send({ t: 'state', lat: wb.spawn.lat + 0.5 * D, lon: wb.spawn.lon, alt: wb.spawn.alt, hdg: 0, pit: 0, rol: 0, spd: 130, fire: 0 });
 await sleep(80);
 a.state();
 a.send({ t: 'hit', targetId: b.id });
@@ -107,7 +115,7 @@ await sleep(150);
 check('far-away hit rejected (distance rule)', a.of('hit').length === 0);
 
 // --- 6. legitimate hits + token bucket ---
-b.state({ lat: wa.spawn.lat, lon: wa.spawn.lon, alt: 800 }); // right next to A
+b.state({ lat: wa.spawn.lat, lon: wa.spawn.lon, alt: wa.spawn.alt }); // right next to A
 await sleep(80);
 a.state();
 // Spam 200 hit claims instantly: the token bucket must let ~15 through, not 200.
@@ -120,7 +128,7 @@ check('token bucket limits burst', hits.length > 0 && hits.length <= 20, `accept
 // Drain slowly enough to refill tokens until B dies.
 for (let round = 0; round < 12 && a.of('death').length === 0; round++) {
   a.state();
-  b.state({ lat: wa.spawn.lat, lon: wa.spawn.lon, alt: 800 });
+  b.state({ lat: wa.spawn.lat, lon: wa.spawn.lon, alt: wa.spawn.alt });
   a.send({ t: 'hit', targetId: b.id });
   await sleep(120);
 }
@@ -152,7 +160,7 @@ b.send({ t: 'respawn' });
 await sleep(200);
 const resp = b.of('respawned');
 check('respawn after cooldown works', resp.length === 1);
-if (resp.length) check('respawn resets to ring', Math.abs(resp[0].lat / D - 60.17) < 0.05);
+if (resp.length) check('respawn resets to ring', Math.abs(resp[0].lat / D - CITY.lat) < 0.05);
 await sleep(50);
 check('respawned player has full health', b.of('respawned').length === 1);
 

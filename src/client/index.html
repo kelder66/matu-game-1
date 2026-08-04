@@ -20,9 +20,11 @@
       <div class="panel">
         <h1>✈️ Matu lennumäng</h1>
         <p class="sub">
-          Lenda Helsingi kohal. Kuni 5 pilooti ja 2 robotlennukit, kes sind jahivad.
+          Vali linn ja lenda. Kuni 5 pilooti ja 2 robotlennukit, kes sind jahivad.
         </p>
         <input id="name" type="text" maxlength="12" placeholder="Sinu nimi" autocomplete="off" />
+        <div class="segLabel">Kus lendame</div>
+        <div id="cityPick" class="seg seg3"></div>
         <div class="segLabel">Robotite raskus</div>
         <div id="diffPick" class="seg">
           <button type="button" data-level="easy">KERGE</button>
@@ -53,6 +55,7 @@
       </div>
 
       <div id="roster"></div>
+      <div id="cityBadge"></div>
       <div id="diffBadge"></div>
 
       <!-- Display only: #hud sets pointer-events:none, so this never takes clicks. -->

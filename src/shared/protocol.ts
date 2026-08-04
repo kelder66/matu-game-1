@@ -18,9 +18,45 @@ export const RESPAWN_DELAY_MS = 2000;
  * Moving the world elsewhere means revisiting NPC.GROUND_ALT below, which is a
  * local terrain figure.
  */
-export const WORLD_CENTER = { lat: 60.17, lon: 24.94 }; // Helsinki, degrees
+export interface City {
+  id: string;
+  name: string;
+  lat: number; // degrees
+  lon: number; // degrees
+  /**
+   * Ellipsoid metres of the local ground -- terrain height above mean sea level PLUS
+   * the geoid separation, which is +19 m around the Baltic, +48 m in Bavaria and
+   * about -32 m on the US coasts. Spawn height and the NPC floor are both measured
+   * from here, so getting it wrong drops the robots underground (Munich sits 520 m
+   * up) or parks everyone uselessly high.
+   */
+  groundAlt: number;
+  /**
+   * Whether Google ships photogrammetry here. Terrain is worldwide; buildings and
+   * trees only inside published coverage areas, and Tallinn is not one of them.
+   * developers.google.com/maps/documentation/javascript/3d/coverage
+   */
+  buildings3D: boolean;
+}
+
+export const CITIES: City[] = [
+  { id: 'helsinki', name: 'Helsingi', lat: 60.17, lon: 24.94, groundAlt: 35, buildings3D: true },
+  { id: 'tallinn', name: 'Tallinn', lat: 59.437, lon: 24.7536, groundAlt: 45, buildings3D: false },
+  { id: 'parnu', name: 'Pärnu', lat: 58.385, lon: 24.497, groundAlt: 20, buildings3D: true },
+  { id: 'munich', name: 'München', lat: 48.1374, lon: 11.5755, groundAlt: 565, buildings3D: true },
+  { id: 'sf', name: 'San Francisco', lat: 37.7935, lon: -122.4, groundAlt: 15, buildings3D: true },
+  { id: 'ny', name: 'New York', lat: 40.7128, lon: -74.006, groundAlt: -20, buildings3D: true },
+];
+
+export const DEFAULT_CITY = 'helsinki';
+
+export function getCity(id: string): City {
+  return CITIES.find((c) => c.id === id) ?? CITIES[0];
+}
+
 export const SPAWN_RING_M = 1500;
-export const SPAWN_ALT_M = 800;
+/** Spawn height above the local ground, not above the ellipsoid. */
+export const SPAWN_AGL_M = 700;
 /** More than MAX_PLAYERS so humans and NPCs never share a spawn point. */
 export const SPAWN_RING_POINTS = 8;
 
@@ -72,20 +108,18 @@ export const BOT_NAMES = ['Robot-1', 'Robot-2'];
 
 export const NPC = {
   /**
-   * Metres above the ELLIPSOID that NPCs treat as the ground. The server has no
-   * terrain data, so this is a hand-set floor for the current WORLD_CENTER
-   * (Helsinki: geoid separation ~+19 m, tallest structure ~134 m). FLIGHT.MIN_AGL
-   * stacks on top, so NPCs bottom out around 240 m.
+   * How high above the city's ground the NPCs pretend the ground is. The server has
+   * no terrain data, so this clearance plus FLIGHT.MIN_AGL is their hard floor:
+   * 200 + 40 = 240 m above the local ground.
    *
-   * Deliberately NOT tied to MIN_AGL: the player was let down to 40 m AGL, and
-   * following them down would have quietly deleted the escape hatch (dive below the
-   * robots) and invalidated the measured difficulty tiers. Moving the world means
-   * revisiting this number.
+   * Deliberately NOT tied to MIN_AGL: the player is allowed down to 40 m AGL, and
+   * letting the robots follow would quietly delete the escape hatch (dive below
+   * them) and invalidate the measured difficulty tiers.
    */
-  GROUND_ALT: 200,
-  /** Soft band: outside it the AI biases its pitch back toward the middle. */
-  MIN_ALT: 350,
-  MAX_ALT: 3000,
+  GROUND_CLEARANCE: 200,
+  /** Soft band ABOVE THE CITY GROUND: outside it the AI biases its pitch back in. */
+  MIN_AGL: 350,
+  MAX_AGL: 2800,
   /**
    * When a bot bothers pulling the trigger. This is NOT a skill knob -- it is the
    * floor of what the controller can physically hold: bang-bang steering at 20 Hz
@@ -245,6 +279,7 @@ export interface Spawn {
 
 export type ClientMsg =
   | { t: 'join'; name: string }
+  | { t: 'city'; id: string }
   | ({ t: 'state' } & WireState)
   | { t: 'hit'; targetId: string }
   | { t: 'respawn' }
@@ -261,8 +296,10 @@ export type ServerMsg =
       players: PlayerInfo[];
       spawn: Spawn;
       difficulty: Difficulty;
+      city: string;
     }
   | { t: 'difficulty'; level: Difficulty; by: string }
+  | { t: 'city'; id: string; by: string }
   | { t: 'joined'; player: PlayerInfo }
   | { t: 'left'; id: string }
   | { t: 'snapshot'; ts: number; players: SnapEntry[] }

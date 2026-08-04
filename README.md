@@ -1,15 +1,31 @@
 # ✈️ Matu lennumäng
 
-Mitmikmängija 3D lennumäng brauseris. Lendad **Helsingi kohal** päris 3D-linnas
-(Google Photorealistic 3D Tiles), kuni **5 pilooti** korraga, sisselogimine ainult
-nimega. Lisaks jahib sind **2 robotlennukit**. Kuulipildujaga tulistad teisi —
-**10 tabamust ja lennuk plahvatab**.
+Mitmikmängija 3D lennumäng brauseris. Lendad päris 3D-linna kohal (Google
+Photorealistic 3D Tiles), kuni **5 pilooti** korraga, sisselogimine ainult nimega.
+Lisaks jahib sind **2 robotlennukit**. Kuulipildujaga tulistad teisi — **10 tabamust
+ja lennuk plahvatab**.
 
-> **Miks Helsingi, mitte Tallinn?** Google'i fotorealistlikud 3D-plaadid katavad
-> reljeefi kogu maailmas, aga **hooneid ja puid ainult avaldatud aladel**. Eestis on
-> need ainult Pärnu ja Haapsalu kandis — Tallinn ja Tartu tulevad lameda satelliidipildina
-> reljeefi peal, ükskõik mida renderdajaga teha.
-> [Kattuvuse kaart](https://developers.google.com/maps/documentation/javascript/3d/coverage)
+## Linnad
+
+Avaekraanil valid linna; keegi saab seda ka keset mängu muuta, siis kolib **kogu
+maailm** korraga (kõik mängijad ja robotid teisaldatakse uue linna ringile).
+
+| Linn | 3D hooned |
+|---|---|
+| Helsingi, Pärnu, München, San Francisco, New York | jah |
+| **Tallinn** | **ei — ainult reljeef ja satelliidipilt** |
+
+Google'i 3D-plaadid katavad reljeefi kogu maailmas, aga **hooneid ja puid ainult
+avaldatud aladel**. Eestis on need ainult Pärnu ja Haapsalu kandis. Tallinn on
+nimekirjas sees, sest see on kodulinn, aga nupul on hoiatus `lame` — ükski
+renderdaja seadistus seda ei muuda.
+[Kattuvuse kaart](https://developers.google.com/maps/documentation/javascript/3d/coverage)
+
+Uue linna lisamine on üks rida `CITIES`-massiivis failis `src/shared/protocol.ts`.
+Oluline: `groundAlt` on **ellipsoidi meetrites** (maapind merepinnast + geoidi vahe,
+Läänemerel +19 m, Baieris +48 m, USA rannikul −32 m). Sellest arvutatakse nii
+stardikõrgus kui robotite põrand — München on 565 m kõrgusel ja vale number saadaks
+robotid maa alla.
 
 Töötab arvutis (Chrome, Safari) ja **telefonis** (puutejuhtimine, landscape).
 
@@ -19,7 +35,7 @@ Töötab arvutis (Chrome, Safari) ja **telefonis** (puutejuhtimine, landscape).
 |---|---|
 | ↑ ↓ (või W S) | nina üles / alla |
 | ← → (või A D) | kaldu — lennuk pöörab kalde suunas |
-| Shift / Ctrl | kiiremini / aeglasemalt (250–790 km/h) |
+| Shift / Ctrl | kiiremini / aeglasemalt |
 | Tühik | tulista |
 | F | vaheta robotite raskust (ka keset lendu) |
 
@@ -41,6 +57,14 @@ Lisa URL-i lõppu `?touch`, et puutejuhtimist ka arvutis proovida.
 
 Maapind ei tapa — kui lendad liiga madalale, lennuk lihtsalt ei lähe allapoole.
 Ainult kuulid tapavad.
+
+**Kiirusnäidik näitab tegelikku kiirust üle maa**, mitte lennuki nominaalset
+õhkkiirust. Need ei ole sama asi: `integrate()` piirab ajasammu 0,1 sekundiga, et
+taustal olev vahekaart ei teleporteeriks lennukit läbi planeedi — aga see tähendab,
+et **alla ~10 kaadri sekundis lendab lennuk päriselt aeglasemalt** kui nominaalne
+kiirus lubab. Mõõdetud 3 fps juures: nominaalne 720 km/h, tegelik 133 km/h. Näidik
+mõõdab nüüd päris läbitud vahemaad sekundis, nii et see ei valeta — ja langeb ka
+õigesti tõusul/sukeldumisel, kus ainult horisontaalne osa on kiirus üle maa.
 
 Madalaim lubatud kõrgus on **40 m maapinnast**, ehk katuseid saab riivata. See on
 võimalik ainult tänu sellele, et maapinna tuvastus vaatab **1,6 s ette** (mitte

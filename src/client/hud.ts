@@ -1,5 +1,11 @@
 import { PerspectiveCamera, Vector3 } from 'three';
-import { DIFFICULTY_LABEL, MAX_HITS, RAD2DEG, type Difficulty } from '../shared/protocol';
+import {
+  DIFFICULTY_LABEL,
+  MAX_HITS,
+  RAD2DEG,
+  type City,
+  type Difficulty,
+} from '../shared/protocol';
 import type { FlightState } from '../shared/flight';
 import { Minimap } from './minimap';
 import type { Remote } from './net';
@@ -22,6 +28,7 @@ export class Hud {
   private arrowDist = $('arrowDist');
   private hitFlash = $('hitFlash');
   private diffBadge = $('diffBadge');
+  private cityBadge = $('cityBadge');
   private minimap = new Minimap($<HTMLCanvasElement>('minimap'));
 
   private tags = new Map<string, HTMLElement>();
@@ -34,6 +41,15 @@ export class Hud {
       const el = document.createElement('div');
       el.className = 'pip';
       this.pips.appendChild(el);
+    }
+  }
+
+  setCity(city: City, by: string | null) {
+    this.cityBadge.textContent = by ? `${by} valis: ${city.name.toUpperCase()}` : city.name;
+    this.cityBadge.classList.toggle('flat', !city.buildings3D);
+    if (by) {
+      this.cityBadge.classList.add('changed');
+      this.diffFlashUntil = performance.now() + 1600;
     }
   }
 
@@ -132,6 +148,7 @@ export class Hud {
     if (this.diffFlashUntil && now > this.diffFlashUntil) {
       this.diffFlashUntil = 0;
       this.diffBadge.classList.remove('changed');
+      this.cityBadge.classList.remove('changed');
     }
 
     this.minimap.draw(state, myPos, remotes);

@@ -11,12 +11,15 @@ import {
   NPC,
   NPC_COUNT,
   RESPAWN_DELAY_MS,
-  SPAWN_ALT_M,
+  SPAWN_AGL_M,
   SPAWN_RING_M,
   SPAWN_RING_POINTS,
   TICK_MS,
-  WORLD_CENTER,
+  DEFAULT_CITY,
+  getCity,
+  CITIES,
   DEG2RAD,
+  type City,
   type ClientMsg,
   type Difficulty,
   type PlayerInfo,
@@ -67,6 +70,7 @@ interface Player extends Combatant {
   spawnCount: number;
   socketAlive: boolean;
   diffAt: number;
+  cityAt: number;
   /** Bots hold fire until this time, so a respawn isn't instantly punished. */
   botSafeUntil: number;
 }
@@ -81,9 +85,9 @@ interface BotPlayer extends Combatant {
 }
 
 /** Great-circle destination point, then the initial bearing back toward the centre. */
-function ringSpawn(index: number): Spawn {
-  const lat1 = WORLD_CENTER.lat * DEG2RAD;
-  const lon1 = WORLD_CENTER.lon * DEG2RAD;
+function ringSpawn(index: number, city: City): Spawn {
+  const lat1 = city.lat * DEG2RAD;
+  const lon1 = city.lon * DEG2RAD;
   const brg = (index * 2 * Math.PI) / SPAWN_RING_POINTS;
   const d = SPAWN_RING_M / EARTH_R;
 
@@ -104,7 +108,7 @@ function ringSpawn(index: number): Spawn {
     Math.cos(lat) * Math.sin(lat1) - Math.sin(lat) * Math.cos(lat1) * Math.cos(dLon),
   );
 
-  return { lat, lon, alt: SPAWN_ALT_M, hdg };
+  return { lat, lon, alt: city.groundAlt + SPAWN_AGL_M, hdg };
 }
 
 /** Geodetic (radians, metres) -> ECEF metres. Spherical is plenty for a range check. */
@@ -151,6 +155,7 @@ export class World {
   private bots: BotPlayer[] = [];
   private timers: NodeJS.Timeout[] = [];
   private difficulty: Difficulty = readDifficultyEnv();
+  private cityId: string = process.env.CITY || DEFAULT_CITY;
   /** Set while no humans are connected, so the first joiner finds bots on the ring. */
   private botsParked = true;
 
@@ -166,6 +171,10 @@ export class World {
   stop() {
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
+  }
+
+  private get city(): City {
+    return getCity(this.cityId);
   }
 
   private info(p: Combatant): PlayerInfo {
@@ -260,6 +269,9 @@ export class World {
         case 'difficulty':
           this.onDifficulty(me, msg.level);
           break;
+        case 'city':
+          this.onCity(me, msg.id);
+          break;
       }
     });
 
@@ -306,6 +318,7 @@ export class World {
       socketAlive: true,
       bot: false,
       diffAt: 0,
+      cityAt: 0,
       botSafeUntil: now + NPC.SPAWN_GRACE_MS,
     };
     this.players.set(player.id, player);
@@ -329,6 +342,7 @@ export class World {
       players: others,
       spawn: this.nextSpawn(player),
       difficulty: this.difficulty,
+      city: this.cityId,
     });
     this.broadcast({ t: 'joined', player: this.info(player) }, player.id);
     return player;
@@ -336,7 +350,7 @@ export class World {
 
   /** Rotate through ring points so repeated respawns don't stack in one spot. */
   private nextSpawn(p: { slot: number; spawnCount: number }): Spawn {
-    const s = ringSpawn((p.slot + p.spawnCount) % SPAWN_RING_POINTS);
+    const s = ringSpawn((p.slot + p.spawnCount) % SPAWN_RING_POINTS, this.city);
     p.spawnCount++;
     return s;
   }
@@ -421,6 +435,36 @@ export class World {
     this.broadcast({ t: 'respawned', id: p.id, ...s });
   }
 
+  /**
+   * Changing city teleports the whole world. Everyone has to move together: leaving
+   * anyone behind would put them a thousand kilometres from the fight with no way
+   * back, so every living player and both bots are respawned on the new ring.
+   */
+  private onCity(p: Player, id: string) {
+    if (!CITIES.some((c) => c.id === id)) return;
+    if (id === this.cityId) return; // no-op, don't broadcast
+    const now = Date.now();
+    if (now - p.cityAt < 1000) return; // it is an expensive move; rate limit harder
+    p.cityAt = now;
+
+    this.cityId = id;
+    this.broadcast({ t: 'city', id, by: p.name });
+
+    // Bots must be announced, not merely moved: `respawned` is what makes each client
+    // clear its interpolation buffer. Without it the plane slides smoothly from
+    // Helsinki to Munich rather than simply being there.
+    for (const b of this.bots) {
+      this.resetBot(b);
+      this.broadcast({ t: 'respawned', id: b.id, ...this.botSpawn(b) });
+    }
+    for (const other of this.players.values()) {
+      if (!other.alive) continue;
+      other.state = null;
+      other.botSafeUntil = now + NPC.SPAWN_GRACE_MS;
+      this.broadcast({ t: 'respawned', id: other.id, ...this.nextSpawn(other) });
+    }
+  }
+
   // --- NPCs ---------------------------------------------------------------
 
   private makeBot(index: number): BotPlayer {
@@ -433,7 +477,7 @@ export class World {
       state: null,
       stateAt: 0,
       bot: true,
-      ai: createBot(index, createFlightState(0, 0, SPAWN_ALT_M, 0)),
+      ai: createBot(index, createFlightState(0, 0, 0, 0)),
       respawnAt: 0,
       leashed: false,
       spawnCount: 0,
@@ -442,9 +486,15 @@ export class World {
     return bot;
   }
 
+  /** The bot's current pose as a Spawn, for the messages that announce a move. */
+  private botSpawn(b: BotPlayer): Spawn {
+    const fs = b.ai.fs;
+    return { lat: fs.lat, lon: fs.lon, alt: fs.alt, hdg: fs.heading };
+  }
+
   private resetBot(b: BotPlayer) {
     // Bots take the ring points above MAX_PLAYERS, so they never collide with humans.
-    const s = ringSpawn((MAX_PLAYERS + b.ai.index + b.spawnCount) % SPAWN_RING_POINTS);
+    const s = ringSpawn((MAX_PLAYERS + b.ai.index + b.spawnCount) % SPAWN_RING_POINTS, this.city);
     b.spawnCount++;
     b.ai.fs = createFlightState(s.lat, s.lon, s.alt, s.hdg);
     b.ai.targetId = '';
@@ -481,15 +531,7 @@ export class World {
       if (!b.alive) {
         if (now >= b.respawnAt) {
           this.resetBot(b);
-          const fs = b.ai.fs;
-          this.broadcast({
-            t: 'respawned',
-            id: b.id,
-            lat: fs.lat,
-            lon: fs.lon,
-            alt: fs.alt,
-            hdg: fs.heading,
-          });
+          this.broadcast({ t: 'respawned', id: b.id, ...this.botSpawn(b) });
         }
         continue;
       }
@@ -509,7 +551,7 @@ export class World {
     // Never hold a reference across ticks -- a disconnect would leave it dangling.
     const target = ai.targetId ? this.players.get(ai.targetId) : undefined;
     const targetState =
-      target && target.alive && target.state ? target.state : patrolTarget(ai.index, now);
+      target && target.alive && target.state ? target.state : patrolTarget(ai.index, now, this.city);
     const hunting = Boolean(target && target.alive && target.state);
 
     // Wingman spacing first: bearingTo is scratch-free, so it can't clobber the aim.
@@ -531,10 +573,10 @@ export class World {
     _aimState.spd = targetState.spd;
 
     const aim = aimAt(ai.fs, _aimState, hunting ? d.leadSeconds : 0);
-    b.leashed = applyLeash(ai, aim, b.leashed);
+    b.leashed = applyLeash(ai, aim, b.leashed, this.city);
 
-    steer(ai, aim, d, now, hunting ? targetState.spd : 0);
-    integrate(ai.fs, ai.input, NPC.GROUND_ALT, dt);
+    steer(ai, aim, d, now, this.city.groundAlt, hunting ? targetState.spd : 0);
+    integrate(ai.fs, ai.input, this.city.groundAlt + NPC.GROUND_CLEARANCE, dt);
     if (ai.fs.speed > d.maxSpeed) ai.fs.speed = d.maxSpeed;
 
     this.botFire(b, target, d, now, hunting && !b.leashed);

@@ -4,9 +4,9 @@
 import {
   FLIGHT,
   NPC,
-  SPAWN_ALT_M,
-  WORLD_CENTER,
+  SPAWN_AGL_M,
   DEG2RAD,
+  type City,
   type Tuning,
   type WireState,
 } from '../shared/protocol.js';
@@ -80,7 +80,10 @@ export function bearingTo(a: { lat: number; lon: number }, b: { lat: number; lon
   return Math.atan2(dE, dN);
 }
 
-const HOME = { lat: WORLD_CENTER.lat * DEG2RAD, lon: WORLD_CENTER.lon * DEG2RAD };
+/** The world centre moves with the chosen city, so nothing may cache it. */
+function home(city: City) {
+  return { lat: city.lat * DEG2RAD, lon: city.lon * DEG2RAD, alt: city.groundAlt + SPAWN_AGL_M };
+}
 
 export function createBot(index: number, spawn: FlightState): Bot {
   return {
@@ -104,7 +107,14 @@ export function createBot(index: number, spawn: FlightState): Bot {
  * Bang-bang with a deadband, on purpose: the result moves like a kid on a keyboard
  * rather than like a guided missile.
  */
-export function steer(b: Bot, aim: typeof _aim, d: Tuning, now: number, targetSpd = 0) {
+export function steer(
+  b: Bot,
+  aim: typeof _aim,
+  d: Tuning,
+  now: number,
+  ground: number,
+  targetSpd = 0,
+) {
   const i = b.input;
   const evading = now < b.evadeUntil;
 
@@ -133,8 +143,10 @@ export function steer(b: Bot, aim: typeof _aim, d: Tuning, now: number, targetSp
   // regardless of bank), so aiming the nose at the target's elevation angle is
   // literally correct -- no bank-to-pitch compensation needed.
   let bias = b.pitchBias + (evading ? 0.2 : 0);
-  if (b.fs.alt < NPC.MIN_ALT) bias += (NPC.MIN_ALT - b.fs.alt) / 300;
-  if (b.fs.alt > NPC.MAX_ALT) bias -= (b.fs.alt - NPC.MAX_ALT) / 300;
+  const floor = ground + NPC.MIN_AGL;
+  const ceiling = ground + NPC.MAX_AGL;
+  if (b.fs.alt < floor) bias += (floor - b.fs.alt) / 300;
+  if (b.fs.alt > ceiling) bias -= (b.fs.alt - ceiling) / 300;
 
   const pitchWant = clamp(aim.elevation + bias, -FLIGHT.MAX_PITCH * 0.8, FLIGHT.MAX_PITCH * 0.8);
   i.pitch = b.fs.pitch < pitchWant - 0.04 ? 1 : b.fs.pitch > pitchWant + 0.04 ? -1 : 0;
@@ -208,13 +220,14 @@ export function stackOffset(index: number): number {
 }
 
 /** A slowly orbiting point to circle when nobody is worth chasing. */
-export function patrolTarget(index: number, now: number): WireState {
+export function patrolTarget(index: number, now: number, city: City): WireState {
+  const h = home(city);
   const ang = now / 30000 + (index * Math.PI) / 2;
   const r = 2500 / EARTH_R;
   return {
-    lat: HOME.lat + Math.cos(ang) * r,
-    lon: HOME.lon + (Math.sin(ang) * r) / Math.cos(HOME.lat),
-    alt: SPAWN_ALT_M,
+    lat: h.lat + Math.cos(ang) * r,
+    lon: h.lon + (Math.sin(ang) * r) / Math.cos(h.lat),
+    alt: h.alt,
     hdg: 0,
     pit: 0,
     rol: 0,
@@ -227,19 +240,20 @@ export function patrolTarget(index: number, now: number): WireState {
  * If a bot has been dragged too far from the play area, fly it home. Without this,
  * one player heading east takes both bots with him permanently.
  */
-export function applyLeash(b: Bot, aim: typeof _aim, leashed: boolean): boolean {
-  const fromHome = groundRange(b.fs, HOME);
+export function applyLeash(b: Bot, aim: typeof _aim, leashed: boolean, city: City): boolean {
+  const h = home(city);
+  const fromHome = groundRange(b.fs, h);
   if (!leashed && fromHome > NPC.LEASH_M) leashed = true;
   else if (leashed && fromHome < NPC.LEASH_HOME_M) leashed = false;
 
   if (leashed) {
-    const home = aimAt(b.fs, {
-      lat: HOME.lat, lon: HOME.lon, alt: SPAWN_ALT_M,
+    const back = aimAt(b.fs, {
+      lat: h.lat, lon: h.lon, alt: h.alt,
       hdg: 0, pit: 0, rol: 0, spd: 0, fire: 0,
     }, 0);
-    aim.bearing = home.bearing;
-    aim.elevation = home.elevation;
-    aim.range = home.range;
+    aim.bearing = back.bearing;
+    aim.elevation = back.elevation;
+    aim.range = back.range;
   }
   return leashed;
 }

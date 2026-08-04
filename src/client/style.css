@@ -295,7 +295,7 @@ button:active {
 #diffBadge {
   position: absolute;
   right: 20px;
-  top: 132px;
+  top: 134px;
   font-size: 11px;
   letter-spacing: 1px;
   color: #9fb6cc;
@@ -526,9 +526,15 @@ button:active {
   }
 
   #diffBadge {
-    top: 104px;
+    top: 106px;
     right: 16px;
     font-size: 10px;
+  }
+
+  #cityBadge {
+    top: 90px;
+    right: 16px;
+    font-size: 11px;
   }
 
   #attribution {
@@ -580,4 +586,44 @@ button:active {
 
 #rotate h1 {
   font-size: 46px;
+}
+
+/* City picker: same segmented control, wrapped to three per row. */
+.seg3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.seg button i {
+  display: block;
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0;
+  color: #ffcc66;
+}
+
+.seg button.on i {
+  color: #ffe9b0;
+}
+
+#cityBadge {
+  position: absolute;
+  right: 20px;
+  top: 112px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: #dce8f4;
+  text-align: right;
+  text-shadow: 0 1px 3px #000;
+  transition: color 0.3s;
+}
+
+#cityBadge.flat::after {
+  content: " (lame kaart)";
+  color: #ffcc66;
+  font-weight: 400;
+}
+
+#cityBadge.changed {
+  color: #ffcc44;
 }

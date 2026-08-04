@@ -1,10 +1,13 @@
 import { Group, Quaternion, Vector3 } from 'three';
 import {
+  CITIES,
   COMBAT,
+  DEFAULT_CITY,
   DEFAULT_DIFFICULTY,
   DIFFICULTIES,
   DIFFICULTY,
   TICK_MS,
+  getCity,
   type Difficulty,
   type Spawn,
 } from '../shared/protocol';
@@ -45,6 +48,44 @@ let lastTime = 0;
 
 /** What this browser wants; the server holds the value everyone actually plays with. */
 let wantDifficulty: Difficulty = DEFAULT_DIFFICULTY;
+let wantCity = DEFAULT_CITY;
+
+/**
+ * Ground speed measured from actual displacement per wall-clock second, not from
+ * state.speed.
+ *
+ * They are not the same number. integrate() clamps dt to 0.1 s so a backgrounded tab
+ * cannot teleport the aircraft through the planet -- which means that below ~10 fps
+ * the simulation advances slower than real time and the plane genuinely crosses less
+ * ground than its nominal airspeed claims. Measured at 3 fps: nominal 720 km/h,
+ * actual 133 km/h. Reading the real displacement keeps the dial honest instead of
+ * hiding the loss, and it also drops correctly in a climb or dive, where only the
+ * horizontal component is speed over the ground.
+ */
+const EARTH_R = 6378137;
+let groundSpeed = 0;
+let lastFix: { lat: number; lon: number; t: number } | null = null;
+
+function updateGroundSpeed(now: number) {
+  if (!lastFix) {
+    lastFix = { lat: state.lat, lon: state.lon, t: now };
+    return;
+  }
+  const elapsed = (now - lastFix.t) / 1000;
+  if (elapsed < 0.25) return; // average over a readable window
+
+  const dN = (state.lat - lastFix.lat) * EARTH_R;
+  const dE = (state.lon - lastFix.lon) * EARTH_R * Math.cos(state.lat);
+  const measured = Math.hypot(dN, dE) / elapsed;
+  lastFix = { lat: state.lat, lon: state.lon, t: now };
+
+  // A teleport (spawn, city change) would read as thousands of km/h; ignore it.
+  if (measured > FLIGHT_MAX_PLAUSIBLE) return;
+  groundSpeed += (measured - groundSpeed) * 0.5;
+}
+
+/** Nothing legitimate exceeds the top speed; anything above it is a teleport. */
+const FLIGHT_MAX_PLAUSIBLE = 400;
 
 // --- Bootstrap ---
 
@@ -89,6 +130,35 @@ async function main() {
     paintPicker();
   });
   paintPicker();
+
+  // City picker. Built from CITIES so adding a city is a one-line data change.
+  const stored2 = localStorage.getItem('city');
+  if (stored2 && CITIES.some((c) => c.id === stored2)) wantCity = stored2;
+  const cityPick = $('cityPick');
+  for (const c of CITIES) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.city = c.id;
+    // Tallinn has terrain but no photogrammetry -- say so rather than let a kid
+    // pick his home town and wonder why it looks flat.
+    b.innerHTML = c.buildings3D ? c.name : `${c.name}<i>lame</i>`;
+    cityPick.appendChild(b);
+  }
+  const paintCity = () => {
+    for (const b of cityPick.querySelectorAll('button')) {
+      b.classList.toggle('on', b.dataset.city === wantCity);
+    }
+  };
+  cityPick.addEventListener('click', (e) => {
+    const el = (e.target as HTMLElement).closest('button');
+    const id = el?.dataset.city;
+    if (!id) return;
+    wantCity = id;
+    localStorage.setItem('city', id);
+    paintCity();
+    if (net) net.send({ t: 'city', id }); // mid-game change moves everyone
+  });
+  paintCity();
 
   // F cycles difficulty mid-flight, so a stuck kid gets relief without a reload.
   onPress('KeyF', () => {
@@ -141,6 +211,12 @@ function startGame(rawName: string) {
       if (by === null && level !== wantDifficulty) {
         net.send({ t: 'difficulty', level: wantDifficulty });
       }
+    },
+    onCity: (id, by) => {
+      hud.setCity(getCity(id), by);
+      if (by === null && id !== wantCity) net.send({ t: 'city', id: wantCity });
+      // Everything about the world moved; the ground reading is now meaningless.
+      lastFix = null;
     },
     onHit: (targetId, _shooterId, hits) => {
       if (targetId === net.myId) {
@@ -203,6 +279,7 @@ function respawnSelf(spawn: Spawn) {
   }
   // Otherwise the camera would swoop in from wherever it last was.
   world.snapCamera();
+  lastFix = null; // a fresh spawn is a jump, not travel
 }
 
 function explodeAt(at: Vector3) {
@@ -258,7 +335,8 @@ function frame(now: number) {
   world.update(state, dt);
 
   hud.update(world.camera, myPlane.position, state, net.remotes);
-  hud.setReadout(state.speed, Math.max(0, state.alt - world.groundAlt));
+  updateGroundSpeed(now);
+  hud.setReadout(groundSpeed, Math.max(0, state.alt - world.groundAlt));
   const attr = world.attributions();
   if (attr) hud.setAttribution(attr);
 
